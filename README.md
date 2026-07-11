@@ -11,7 +11,7 @@ A personal Android news app that fetches the top UK stories every morning, lets 
 - **Rate every story** — 🟢 Interested / 🟡 Maybe / 🔴 Not for me. Your ratings train the app.
 - **Seed your interests** — type a few topics in Settings (e.g. "football, space, economy") to bias the early feed before you've rated anything; they merge with what you teach it by rating.
 - **5 stories at a time** with a **Load more** button.
-- **Summary + tap to open** — reads the RSS summary in-app; tap **Read full story** to open the article on the outlet's site. Tap **60s summary** for an on-device overview built from the article's own sentences (fetched only on demand, no API key).
+- **In-app reader** — tap **Full article** to open the story inside NewsRadar in a built-in reader window (Android WebView); tap **60s summary** to open the on-device overview in the same window. Both have a persistent **✕** top-right that's always visible to close, and the device Back button closes them too — you never leave the app.
 - **All major UK sources** — BBC, Guardian, Telegraph, Independent, Sky, Mirror, Metro, Daily Mail, Express, Evening Standard, HuffPost UK, iNews, FT, Daily Record, Scotsman, Wales Online. Turn any of them **off** in Settings.
 - **Paywall-aware** — a 🔒 badge marks outlets that need a subscription to read the full article (headlines & summaries always show for free). Hard-paywall outlets (Telegraph, Financial Times) start **switched off**; enable them in Settings if you subscribe.
 - **Themes** — light / dark / follow-system, plus **6 colour schemes** (Blue, Teal, Purple, Sunset, Forest, Mono).

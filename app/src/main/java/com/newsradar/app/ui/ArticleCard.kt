@@ -17,7 +17,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.SentimentDissatisfied
 import androidx.compose.material.icons.filled.SentimentNeutral
 import androidx.compose.material.icons.filled.SentimentSatisfied
@@ -128,68 +130,22 @@ fun ArticleCard(
                 Spacer(Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "Read full story ›",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { onOpen(article.link) }
+                    ModernPill(
+                        text = "Full article",
+                        icon = Icons.Filled.OpenInBrowser,
+                        filled = true,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onOpen(article.link) }
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable(enabled = summary?.loading != true) { onSummary() }
-                    ) {
-                        if (summary?.loading == true) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                "Summarising…",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Article,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (summary?.text != null) "Hide summary" else "60s summary",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                }
-                AnimatedVisibility(visible = summary?.text != null) {
-                    Column(Modifier.padding(top = 10.dp)) {
-                        Text(
-                            "60-second overview",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = summary?.text ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-                AnimatedVisibility(visible = summary?.error == true) {
-                    Text(
-                        "Couldn't load the article text — tap \"Read full story\" instead.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 10.dp)
+                    ModernPill(
+                        text = "60s summary",
+                        icon = Icons.AutoMirrored.Filled.Article,
+                        filled = false,
+                        loading = summary?.loading == true,
+                        modifier = Modifier.weight(1f),
+                        onClick = onSummary
                     )
                 }
                 Spacer(Modifier.height(12.dp))
@@ -260,5 +216,48 @@ private fun RateButton(
         Icon(icon, contentDescription = label, tint = fg, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(4.dp))
         Text(label, style = MaterialTheme.typography.bodyMedium, color = fg)
+    }
+}
+
+/**
+ * Modern pill button used for the card's primary actions (Full article / 60s summary).
+ * Filled = primary emphasis; outline = secondary. Shows a spinner while [loading].
+ */
+@Composable
+private fun ModernPill(
+    text: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    filled: Boolean,
+    loading: Boolean = false,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val container = if (filled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer
+    val content = if (filled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(container)
+            .clickable(enabled = !loading) { onClick() }
+            .padding(horizontal = 16.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(16.dp),
+                color = content
+            )
+        } else {
+            Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = if (loading) "Loading…" else text,
+            style = MaterialTheme.typography.labelLarge,
+            color = content,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }

@@ -74,5 +74,8 @@ dependencies {
     // jsoup (on-demand article text extraction for the 60s summary)
     implementation("org.jsoup:jsoup:1.18.1")
 
+    // Android WebView (in-app reader overlay)
+    implementation("androidx.webkit:webkit:1.11.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -26,6 +26,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -33,7 +36,10 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import androidx.activity.compose.BackHandler
 import com.newsradar.app.data.Rating
+import com.newsradar.app.ui.ReaderOverlay
+import com.newsradar.app.ui.ReaderMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,9 +52,15 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     val weather by vm.weather.collectAsState()
     val showDateBar by vm.showDateBar.collectAsState()
     val showSun by vm.showSun.collectAsState()
-    val context = LocalContext.current
 
-    GreetingDialog(state = greeting, onDismiss = { vm.dismissGreeting() })
+    // In-app reader overlay state.
+    var readerArticle by remember { mutableStateOf<com.newsradar.app.data.Article?>(null) }
+    var readerMode by remember { mutableStateOf(ReaderMode.WEB) }
+
+    // Device Back closes the reader overlay instead of exiting.
+    androidx.activity.compose.BackHandler(enabled = readerArticle != null) {
+        readerArticle = null
+    }
 
     Scaffold(
         topBar = {
@@ -106,14 +118,14 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                                 reasons = state.reasons[article.id].orEmpty(),
                                 showImages = showImages,
                                 summary = summaries[article.id],
-                                onSummary = { vm.requestSummary(article) },
+                                onSummary = {
+                                    readerArticle = article
+                                    readerMode = ReaderMode.SUMMARY
+                                },
                                 ratingDisplay = ratingDisplay,
-                                onOpen = { url ->
-                                    try {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
-                                    } catch (e: android.content.ActivityNotFoundException) {
-                                        // No browser available; silently ignore.
-                                    }
+                                onOpen = {
+                                    readerArticle = article
+                                    readerMode = ReaderMode.WEB
                                 },
                                 onRate = { rating: Rating -> vm.rate(article, rating) }
                             )
@@ -141,6 +153,19 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                 if (state.refreshing) {
                     CircularProgressIndicator(Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
                 }
+            }
+
+            if (readerArticle != null) {
+                ReaderOverlay(
+                    article = readerArticle!!,
+                    mode = readerMode,
+                    summaryText = summaries[readerArticle!!.id]?.text,
+                    summaryLoading = summaries[readerArticle!!.id]?.loading == true,
+                    summaryError = summaries[readerArticle!!.id]?.error == true,
+                    onRequestSummary = { vm.requestSummary(readerArticle!!) },
+                    onSwitchToWeb = { readerMode = ReaderMode.WEB },
+                    onClose = { readerArticle = null }
+                )
             }
         }
     }
