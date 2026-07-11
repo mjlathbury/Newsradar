@@ -45,8 +45,36 @@ class NewsRepository private constructor(context: Context) {
         return fetched.size
     }
 
-    suspend fun getFeedPage(page: Int, pageSize: Int = 5): List<Article> =
-        dao.getFeedPage(pageSize, page * pageSize)
+    /**
+     * ε-greedy feed: a portion of each page is the highest-scored (guided) stories,
+     * the rest are random exploration stories interleaved through the page. This keeps
+     * the recommender a *guide* rather than a filter — the user still sees varied,
+     * un-rated stories so the model keeps learning their preferences.
+     */
+    private val EXPLORATION_RATIO = 0.3 // share of each page that is random exploration
+
+    suspend fun getFeedPage(page: Int, pageSize: Int = 5): List<Article> {
+        val guidedCount = (pageSize * (1 - EXPLORATION_RATIO)).toInt().coerceAtLeast(1)
+        val exploreCount = (pageSize - guidedCount).coerceAtLeast(1)
+
+        val guided = dao.getFeedPage(guidedCount, page * pageSize)
+        val guidedIds = guided.map { it.id }.toSet()
+        val explore = dao.getFeedRandom(exploreCount).filter { it.id !in guidedIds }
+
+        // Interleave: one exploration story every `step` positions, so variety is
+        // spread through the page instead of dumped at the end.
+        val step = (guidedCount / exploreCount).coerceAtLeast(1)
+        val merged = mutableListOf<Article>()
+        var ei = 0
+        guided.forEachIndexed { idx, a ->
+            merged.add(a)
+            if ((idx + 1) % step == 0 && ei < explore.size) {
+                merged.add(explore[ei++])
+            }
+        }
+        while (ei < explore.size) merged.add(explore[ei++])
+        return merged
+    }
 
     suspend fun rate(article: Article, rating: Rating) {
         recommender.applyRating(article, rating)

@@ -21,6 +21,13 @@ interface NewsDao {
     )
     suspend fun getFeedPage(limit: Int, offset: Int): List<Article>
 
+    /** Exploration pool: random un-RED articles (used to keep variety + training signal). */
+    @Query(
+        "SELECT * FROM articles WHERE rating != 'RED' " +
+        "ORDER BY RANDOM() LIMIT :limit"
+    )
+    suspend fun getFeedRandom(limit: Int): List<Article>
+
     @Query("UPDATE articles SET rating = :rating WHERE id = :id")
     suspend fun setRating(id: String, rating: String)
 

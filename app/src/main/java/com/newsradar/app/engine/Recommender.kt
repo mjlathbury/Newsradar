@@ -14,7 +14,7 @@ import kotlin.math.ln
  * Content-based recommender with TF-IDF weighting.
  *
  * Learning (on rating):
- *   delta = GREEN:+2  AMBER:+0.5  RED:-2
+ *   delta = GREEN:+1.5  AMBER:+0.4  RED:-1.5
  *   For each unique token in the article: keyword.weight += delta; keyword.docCount++
  *   The outlet's weight += delta * 0.25 (outlet is a weaker signal than topic).
  *
@@ -29,9 +29,9 @@ class Recommender(private val dao: NewsDao) {
     private val SEED_WEIGHT = 2.0 // equivalent to one GREEN rating per seed token
 
     private fun delta(rating: Rating): Double = when (rating) {
-        Rating.GREEN -> 2.0
-        Rating.AMBER -> 0.5
-        Rating.RED -> -2.0
+        Rating.GREEN -> 1.5
+        Rating.AMBER -> 0.4
+        Rating.RED -> -1.5
         Rating.NONE -> 0.0
     }
 
