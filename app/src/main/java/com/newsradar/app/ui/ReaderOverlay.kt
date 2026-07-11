@@ -162,7 +162,8 @@ private fun WebReader(url: String) {
                     }
                     loadUrl(url)
                 }
-            }
+            },
+            onRelease = { it.destroy() }
         )
         if (loading) {
             CircularProgressIndicator(Modifier.align(Alignment.Center))

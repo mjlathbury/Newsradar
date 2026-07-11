@@ -94,27 +94,28 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
             )
         }
     ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad)) {
-            if (showDateBar) {
-                val now = java.time.LocalDate.now()
-                Text(
-                    now.format(
-                        java.time.format.DateTimeFormatter
-                            .ofPattern("EEEE, d MMMM yyyy", java.util.Locale.getDefault())
-                    ),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                )
-            }
+        Box(Modifier.fillMaxSize().padding(pad)) {
+            Column(Modifier.fillMaxSize()) {
+                if (showDateBar) {
+                    val now = java.time.LocalDate.now()
+                    Text(
+                        now.format(
+                            java.time.format.DateTimeFormatter
+                                .ofPattern("EEEE, d MMMM yyyy", java.util.Locale.getDefault())
+                        ),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
+                    )
+                }
 
-            // Weather bar below the date bar (hidden entirely when disabled in Settings).
-            WeatherBar(state = weather, showSun = showSun)
+                // Weather bar below the date bar (hidden entirely when disabled in Settings).
+                WeatherBar(state = weather, showSun = showSun)
 
-            Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
                 when {
                     state.loading && state.articles.isEmpty() ->
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
@@ -172,8 +173,9 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                     CircularProgressIndicator(Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
                 }
             }
+            }
 
-            // Hamburger dropdown (anchored top-left, under the app bar). Home = scroll feed to top.
+            // Hamburger dropdown (anchored top-left). Home = scroll feed to top.
             // wrapContentSize so the anchor Box doesn't cover the feed and block touches.
             Box(Modifier.wrapContentSize(Alignment.TopStart)) {
                 DropdownMenu(
