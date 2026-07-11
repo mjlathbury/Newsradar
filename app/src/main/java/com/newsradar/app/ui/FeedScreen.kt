@@ -78,9 +78,6 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         }
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
-            // Weather bar pinned at the very top (below the app bar).
-            WeatherBar(state = weather, showSun = showSun)
-
             if (showDateBar) {
                 val now = java.time.LocalDate.now()
                 Text(
@@ -96,6 +93,9 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                         .padding(horizontal = 14.dp, vertical = 8.dp)
                 )
             }
+
+            // Weather bar below the date bar (hidden entirely when disabled in Settings).
+            WeatherBar(state = weather, showSun = showSun)
 
             Box(Modifier.fillMaxSize()) {
                 when {
