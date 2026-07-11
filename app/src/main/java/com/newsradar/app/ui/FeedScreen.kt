@@ -9,16 +9,22 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -28,7 +34,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -62,10 +70,19 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         readerArticle = null
     }
 
+    var menuExpanded by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("NewsRadar") },
+                navigationIcon = {
+                    IconButton(onClick = { menuExpanded = true }) {
+                        Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                    }
+                },
                 actions = {
                     IconButton(onClick = { vm.refreshNow() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
@@ -109,6 +126,7 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                     )
 
                     else -> LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(vertical = 6.dp)
                     ) {
@@ -152,6 +170,23 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
 
                 if (state.refreshing) {
                     CircularProgressIndicator(Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                }
+            }
+
+            // Hamburger dropdown (anchored top-left, under the app bar). Home = scroll feed to top.
+            // wrapContentSize so the anchor Box doesn't cover the feed and block touches.
+            Box(Modifier.wrapContentSize(Alignment.TopStart)) {
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Home") },
+                        onClick = {
+                            menuExpanded = false
+                            scope.launch { listState.scrollToItem(0) }
+                        }
+                    )
                 }
             }
 
