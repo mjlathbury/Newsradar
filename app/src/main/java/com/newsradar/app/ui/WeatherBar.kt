@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
 import com.newsradar.app.weather.DailyForecast
 import com.newsradar.app.weather.HourlyPoint
 import com.newsradar.app.weather.WeatherData
