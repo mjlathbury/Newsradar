@@ -44,34 +44,40 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.newsradar.app.data.Article
 
 /** Which view the reader overlay is showing. */
 enum class ReaderMode { WEB, SUMMARY }
 
 /**
- * In-app reader "window". A full-screen overlay with a sticky top bar that is
  * always visible — the ✕ (close) button top-right never scrolls away. Closing
  * returns to the feed. The device Back button also closes it (handled by the
  * caller via BackHandler, or here if used standalone).
  *
- * @param mode       WEB shows the publisher page in a WebView; SUMMARY shows the
- *                   on-device 60s overview (passed in [summaryText]).
+ * @param url        the URL to load (article link or external video page).
+ * @param title      headline / programme name shown in the top bar.
+ * @param outlet     source name shown in the top bar (uppercased).
+ * @param mode       WEB shows the page in a WebView; SUMMARY shows the on-device
+ *                   60s overview (passed in [summaryText]).
  * @param summaryText pre-fetched 60s summary text (null while loading / on error).
  * @param summaryLoading true while the summary is being generated.
- * @param onRequestSummary called when the user taps "Generate 60s summary" in WEB mode.
- * @param onSwitchToWeb called when the user wants to load the full WebView from SUMMARY mode.
+ * @param summaryError true if summary generation failed.
+ * @param onRequestSummary called when the user taps "Generate 60s summary". Omit
+ *                   for non-article windows (e.g. video) — the summary UI is then hidden.
+ * @param onSwitchToWeb called when the user wants to load the full WebView from
+ *                   SUMMARY mode. Omit for non-article windows.
  * @param onClose     dismissed the overlay.
  */
 @Composable
 fun ReaderOverlay(
-    article: Article,
+    url: String,
+    title: String,
+    outlet: String,
     mode: ReaderMode,
-    summaryText: String?,
-    summaryLoading: Boolean,
-    summaryError: Boolean,
-    onRequestSummary: () -> Unit,
-    onSwitchToWeb: () -> Unit,
+    summaryText: String? = null,
+    summaryLoading: Boolean = false,
+    summaryError: Boolean = false,
+    onRequestSummary: () -> Unit = {},
+    onSwitchToWeb: () -> Unit = {},
     onClose: () -> Unit
 ) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
@@ -86,13 +92,13 @@ fun ReaderOverlay(
             ) {
                 Column(Modifier.weight(1f).padding(start = 8.dp)) {
                     Text(
-                        article.outletName.uppercase(),
+                        outlet.uppercase(),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        article.title,
+                        title,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
@@ -115,7 +121,7 @@ fun ReaderOverlay(
         // ---- Body (below the sticky bar) ----
         Box(Modifier.fillMaxSize().padding(top = 57.dp)) {
             when (mode) {
-                ReaderMode.WEB -> WebReader(article.link)
+                ReaderMode.WEB -> WebReader(url)
                 ReaderMode.SUMMARY -> SummaryReader(
                     summaryText = summaryText,
                     loading = summaryLoading,

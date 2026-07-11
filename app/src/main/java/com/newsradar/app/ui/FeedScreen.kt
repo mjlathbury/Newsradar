@@ -21,6 +21,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +50,15 @@ import com.newsradar.app.data.Rating
 import com.newsradar.app.ui.ReaderOverlay
 import com.newsradar.app.ui.ReaderMode
 
+/** In-app (WebView) live video streams — Brightcove-based UK outlets that play in-app. */
+private val VIDEO_SOURCES = listOf(
+    VideoSource("BBC News", "https://www.bbc.co.uk/news/live/uk"),
+    VideoSource("Sky News", "https://news.sky.com/watch-live-tv"),
+    VideoSource("LBC", "https://www.lbc.co.uk")
+)
+
+private data class VideoSource(val name: String, val url: String)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
@@ -62,12 +72,34 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     val showSun by vm.showSun.collectAsState()
 
     // In-app reader overlay state.
+    var readerOpen by remember { mutableStateOf(false) }
     var readerArticle by remember { mutableStateOf<com.newsradar.app.data.Article?>(null) }
+    var readerUrl by remember { mutableStateOf("") }
+    var readerTitle by remember { mutableStateOf("") }
+    var readerOutlet by remember { mutableStateOf("") }
     var readerMode by remember { mutableStateOf(ReaderMode.WEB) }
 
-    // Device Back closes the reader overlay instead of exiting.
-    androidx.activity.compose.BackHandler(enabled = readerArticle != null) {
+    fun openArticle(a: com.newsradar.app.data.Article, mode: ReaderMode) {
+        readerArticle = a
+        readerUrl = a.link
+        readerTitle = a.title
+        readerOutlet = a.outletName
+        readerMode = mode
+        readerOpen = true
+    }
+
+    fun openVideo(name: String, url: String) {
         readerArticle = null
+        readerUrl = url
+        readerTitle = name
+        readerOutlet = name
+        readerMode = ReaderMode.WEB
+        readerOpen = true
+    }
+
+    // Device Back closes the reader overlay instead of exiting.
+    androidx.activity.compose.BackHandler(enabled = readerOpen) {
+        readerOpen = false
     }
 
     var menuExpanded by remember { mutableStateOf(false) }
@@ -137,15 +169,9 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                                 reasons = state.reasons[article.id].orEmpty(),
                                 showImages = showImages,
                                 summary = summaries[article.id],
-                                onSummary = {
-                                    readerArticle = article
-                                    readerMode = ReaderMode.SUMMARY
-                                },
+                                onSummary = { openArticle(article, ReaderMode.SUMMARY) },
                                 ratingDisplay = ratingDisplay,
-                                onOpen = {
-                                    readerArticle = article
-                                    readerMode = ReaderMode.WEB
-                                },
+                                onOpen = { openArticle(article, ReaderMode.WEB) },
                                 onRate = { rating: Rating -> vm.rate(article, rating) }
                             )
                         }
@@ -189,19 +215,37 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                             scope.launch { listState.scrollToItem(0) }
                         }
                     )
+                    HorizontalDivider()
+                    Text(
+                        "Video",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
+                    )
+                    VIDEO_SOURCES.forEach { src ->
+                        DropdownMenuItem(
+                            text = { Text(src.name) },
+                            onClick = {
+                                menuExpanded = false
+                                openVideo(src.name, src.url)
+                            }
+                        )
+                    }
                 }
             }
 
-            if (readerArticle != null) {
+            if (readerOpen) {
                 ReaderOverlay(
-                    article = readerArticle!!,
+                    url = readerUrl,
+                    title = readerTitle,
+                    outlet = readerOutlet,
                     mode = readerMode,
-                    summaryText = summaries[readerArticle!!.id]?.text,
-                    summaryLoading = summaries[readerArticle!!.id]?.loading == true,
-                    summaryError = summaries[readerArticle!!.id]?.error == true,
-                    onRequestSummary = { vm.requestSummary(readerArticle!!) },
+                    summaryText = readerArticle?.let { summaries[it.id]?.text },
+                    summaryLoading = readerArticle?.let { summaries[it.id]?.loading == true } == true,
+                    summaryError = readerArticle?.let { summaries[it.id]?.error == true } == true,
+                    onRequestSummary = { readerArticle?.let { vm.requestSummary(it) } },
                     onSwitchToWeb = { readerMode = ReaderMode.WEB },
-                    onClose = { readerArticle = null }
+                    onClose = { readerOpen = false }
                 )
             }
         }
