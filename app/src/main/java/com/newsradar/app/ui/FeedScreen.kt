@@ -38,7 +38,12 @@ import com.newsradar.app.data.Rating
 fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     val state by vm.feed.collectAsState()
     val greeting by vm.greeting.collectAsState()
+    val showImages by vm.showImages.collectAsState()
+    val summaries by vm.summaries.collectAsState()
+    val ratingDisplay by vm.ratingDisplay.collectAsState()
     val weather by vm.weather.collectAsState()
+    val showDateBar by vm.showDateBar.collectAsState()
+    val showSun by vm.showSun.collectAsState()
     val context = LocalContext.current
 
     GreetingDialog(state = greeting, onDismiss = { vm.dismissGreeting() })
@@ -60,7 +65,23 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
             // Weather bar pinned at the very top (below the app bar).
-            WeatherBar(state = weather)
+            WeatherBar(state = weather, showSun = showSun)
+
+            if (showDateBar) {
+                val now = java.time.LocalDate.now()
+                Text(
+                    now.format(
+                        java.time.format.DateTimeFormatter
+                            .ofPattern("EEEE, d MMMM yyyy", java.util.Locale.getDefault())
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                )
+            }
 
             Box(Modifier.fillMaxSize()) {
                 when {
@@ -81,6 +102,10 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                             ArticleCard(
                                 article = article,
                                 reasons = state.reasons[article.id].orEmpty(),
+                                showImages = showImages,
+                                summary = summaries[article.id],
+                                onSummary = { vm.requestSummary(article) },
+                                ratingDisplay = ratingDisplay,
                                 onOpen = { url ->
                                     try {
                                         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))

@@ -14,6 +14,9 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 /** Theme mode selection. */
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/** How rating controls are shown on each article card. */
+enum class RatingDisplay { FULL, COLOUR, NONE }
+
 /** Available colour palettes the user can cycle through. */
 enum class ColorScheme { BLUE, TEAL, PURPLE, SUNSET, FOREST, MONO }
 
@@ -26,6 +29,11 @@ class SettingsStore(private val context: Context) {
     private val TOWN = stringPreferencesKey("weather_town")
     private val WEATHER_PROVIDER = stringPreferencesKey("weather_provider")
     private val WEATHER_ENABLED = booleanPreferencesKey("weather_enabled")
+    private val SHOW_IMAGES = booleanPreferencesKey("show_images")
+    private val RATING_DISPLAY = stringPreferencesKey("rating_display")
+    private val SEED_INTERESTS = stringPreferencesKey("seed_interests")
+    private val SHOW_DATE_BAR = booleanPreferencesKey("show_date_bar")
+    private val SHOW_SUN = booleanPreferencesKey("show_sun")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map {
         ThemeMode.valueOf(it[THEME] ?: ThemeMode.SYSTEM.name)
@@ -42,6 +50,26 @@ class SettingsStore(private val context: Context) {
         context.dataStore.data.map { it[WEATHER_PROVIDER] ?: "met_office" }
     val weatherEnabled: Flow<Boolean> =
         context.dataStore.data.map { it[WEATHER_ENABLED] ?: true }
+    val showImages: Flow<Boolean> =
+        context.dataStore.data.map { it[SHOW_IMAGES] ?: true }
+    /** How rating controls appear on cards. */
+    val ratingDisplay: Flow<RatingDisplay> =
+        context.dataStore.data.map {
+            try { RatingDisplay.valueOf(it[RATING_DISPLAY] ?: RatingDisplay.FULL.name) }
+            catch (e: Exception) { RatingDisplay.FULL }
+        }
+    /** Seed keyword interests (comma/space separated) used to bias the early feed. */
+    val seedInterests: Flow<List<String>> =
+        context.dataStore.data.map {
+            it[SEED_INTERESTS].orEmpty()
+                .split(Regex("[,\\n]")).map { w -> w.trim() }.filter { it.isNotBlank() }
+        }
+    /** Show a persistent date bar (Day, Date Month Year) at the top of the feed. */
+    val showDateBar: Flow<Boolean> =
+        context.dataStore.data.map { it[SHOW_DATE_BAR] ?: true }
+    /** Show sunrise/sunset under the expanded weather. */
+    val showSun: Flow<Boolean> =
+        context.dataStore.data.map { it[SHOW_SUN] ?: true }
 
     suspend fun setThemeMode(mode: ThemeMode) =
         context.dataStore.edit { it[THEME] = mode.name }
@@ -63,4 +91,19 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setWeatherEnabled(enabled: Boolean) =
         context.dataStore.edit { it[WEATHER_ENABLED] = enabled }
+
+    suspend fun setShowImages(enabled: Boolean) =
+        context.dataStore.edit { it[SHOW_IMAGES] = enabled }
+
+    suspend fun setRatingDisplay(mode: RatingDisplay) =
+        context.dataStore.edit { it[RATING_DISPLAY] = mode.name }
+
+    suspend fun setSeedInterests(words: List<String>) =
+        context.dataStore.edit { it[SEED_INTERESTS] = words.joinToString(",") }
+
+    suspend fun setShowDateBar(enabled: Boolean) =
+        context.dataStore.edit { it[SHOW_DATE_BAR] = enabled }
+
+    suspend fun setShowSun(enabled: Boolean) =
+        context.dataStore.edit { it[SHOW_SUN] = enabled }
 }

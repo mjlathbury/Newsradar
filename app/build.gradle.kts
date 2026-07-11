@@ -71,5 +71,8 @@ dependencies {
     // RSS parsing (RssParser - pure Kotlin, coroutines)
     implementation("com.prof18.rssparser:rssparser:6.0.8")
 
+    // jsoup (on-demand article text extraction for the 60s summary)
+    implementation("org.jsoup:jsoup:1.18.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

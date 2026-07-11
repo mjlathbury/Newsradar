@@ -34,6 +34,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
@@ -42,6 +45,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.newsradar.app.data.Outlets
 import com.newsradar.app.prefs.ColorScheme
+import com.newsradar.app.prefs.RatingDisplay
 import com.newsradar.app.prefs.ThemeMode
 import com.newsradar.app.weather.WeatherProvider
 
@@ -55,6 +59,11 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val savedTown by vm.town.collectAsState()
     val weatherProviderId by vm.weatherProviderId.collectAsState()
     val weatherEnabled by vm.weatherEnabled.collectAsState()
+    val showImages by vm.showImages.collectAsState()
+    val ratingDisplay by vm.ratingDisplay.collectAsState()
+    val seedInterests by vm.seedInterests.collectAsState()
+    val showDateBar by vm.showDateBar.collectAsState()
+    val showSun by vm.showSun.collectAsState()
     val focusManager = LocalFocusManager.current
 
     Scaffold(
@@ -108,6 +117,35 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth()
             )
             Text(
+                "Your interests",
+                style = MaterialTheme.typography.titleMedium
+            )
+            var interestsText by remember(seedInterests) {
+                mutableStateOf(seedInterests.joinToString(", "))
+            }
+            OutlinedTextField(
+                value = interestsText,
+                onValueChange = { interestsText = it },
+                label = { Text("Topics you care about (comma separated)") },
+                placeholder = { Text("e.g. football, space, economy") },
+                minLines = 2,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    vm.setSeedInterests(
+                        interestsText.split(Regex("[,\\n]")).map { w -> w.trim() }
+                            .filter { w -> w.isNotBlank() })
+                    focusManager.clearFocus()
+                }),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "Seeds bias the early feed toward these topics until you've rated enough " +
+                    "stories. Type a few words, then tap Done and refresh the feed.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
                 "Weather provider",
                 style = MaterialTheme.typography.titleMedium
             )
@@ -153,6 +191,53 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         selected = scheme == cs,
                         onClick = { vm.setScheme(cs) },
                         label = { Text(cs.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setShowImages(!showImages) },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Show images in feed", style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = showImages, onCheckedChange = { vm.setShowImages(it) })
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setShowDateBar(!showDateBar) },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Show date bar at top", style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = showDateBar, onCheckedChange = { vm.setShowDateBar(it) })
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.setShowSun(!showSun) },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Show sunrise/sunset in weather", style = MaterialTheme.typography.bodyLarge)
+                Switch(checked = showSun, onCheckedChange = { vm.setShowSun(it) })
+            }
+            Text("Rating buttons", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Full buttons train the app; switch to colours or hide once it's learned your taste.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RatingDisplay.entries.forEach { mode ->
+                    FilterChip(
+                        selected = ratingDisplay == mode,
+                        onClick = { vm.setRatingDisplay(mode) },
+                        label = {
+                            Text(
+                                when (mode) {
+                                    RatingDisplay.FULL -> "Full"
+                                    RatingDisplay.COLOUR -> "Colours"
+                                    RatingDisplay.NONE -> "Hidden"
+                                }
+                            )
+                        }
                     )
                 }
             }

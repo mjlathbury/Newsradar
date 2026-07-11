@@ -24,6 +24,10 @@ interface NewsDao {
     @Query("UPDATE articles SET rating = :rating WHERE id = :id")
     suspend fun setRating(id: String, rating: String)
 
+    /** Cache the fetched article body text (on-demand summary source). */
+    @Query("UPDATE articles SET summaryText = :text WHERE id = :id")
+    suspend fun setSummaryText(id: String, text: String)
+
     /** Batch score update — one transaction for the whole feed. */
     @Update(entity = Article::class)
     suspend fun updateScores(updates: List<ArticleScoreUpdate>)

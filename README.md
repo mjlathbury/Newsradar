@@ -4,14 +4,14 @@ A personal Android news app that fetches the top UK stories every morning, lets 
 
 ## Features
 
-- **Personal greeting on launch** — a welcome popup says "Good Morning/Afternoon/Evening, (your name)" and shows the full day and date. Set your name in Settings.
-- **Local weather bar** — a collapsible bar above the feed shows today's conditions for your town; tap it to expand into today's detail (feels-like, wind, humidity) plus the **7-day week ahead**. Toggle it off in Settings.
+- **Personal greeting on launch** — a welcome popup says "Good Morning/Afternoon/Evening, (your name)" and shows the full day and date. Set your name in Settings, where you can also switch on a persistent **date bar** (Day, Date Month Year) at the top of the feed.
+- **Local weather bar** — a collapsible bar above the feed shows today's conditions for your town; tap it to expand into today's detail (feels-like, wind, humidity, **sunrise/sunset**) plus the **7-day week ahead** with hourly drill-down. Toggle it or the sunrise/sunset line off in Settings.
 - **Choice of weather providers** (single-select, defaults to **Met Office (UK)**) — Met Office UK / ECMWF / GFS / Best-match, all free with no API key via [Open-Meteo](https://open-meteo.com). *(BBC has no public weather API; the Met Office option uses the same official data BBC Weather is based on.)* Location is set by typing your town — no GPS permission needed.
 - **Daily digest at 7am** — an automatic background fetch pulls fresh headlines from every major UK outlet, then a notification tells you they're ready. There's also a **Refresh now** button any time.
 - **Rate every story** — 🟢 Interested / 🟡 Maybe / 🔴 Not for me. Your ratings train the app.
-- **Keyword-level learning (TF-IDF)** — the app tokenises each article, weights rare/meaningful words more heavily, and re-ranks tomorrow's feed by what you actually care about. The more you use it, the more accurate it gets. Each card shows *why* it was picked ("Matched your interests: …").
+- **Seed your interests** — type a few topics in Settings (e.g. "football, space, economy") to bias the early feed before you've rated anything; they merge with what you teach it by rating.
 - **5 stories at a time** with a **Load more** button.
-- **Summary + tap to open** — reads the RSS summary in-app; tap to open the full article on the outlet's own site (fast, robust, and respects publishers).
+- **Summary + tap to open** — reads the RSS summary in-app; tap **Read full story** to open the article on the outlet's site. Tap **60s summary** for an on-device overview built from the article's own sentences (fetched only on demand, no API key).
 - **All major UK sources** — BBC, Guardian, Telegraph, Independent, Sky, Mirror, Metro, Daily Mail, Express, Evening Standard, HuffPost UK, iNews, FT, Daily Record, Scotsman, Wales Online. Turn any of them **off** in Settings.
 - **Paywall-aware** — a 🔒 badge marks outlets that need a subscription to read the full article (headlines & summaries always show for free). Hard-paywall outlets (Telegraph, Financial Times) start **switched off**; enable them in Settings if you subscribe.
 - **Themes** — light / dark / follow-system, plus **6 colour schemes** (Blue, Teal, Purple, Sunset, Forest, Mono).

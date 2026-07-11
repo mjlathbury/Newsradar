@@ -18,22 +18,41 @@ import kotlin.math.ln
  *   For each unique token in the article: keyword.weight += delta; keyword.docCount++
  *   The outlet's weight += delta * 0.25 (outlet is a weaker signal than topic).
  *
- * Scoring (on ranking a fetched article):
- *   For each token t in the article:
- *     idf = ln( (1 + totalRated) / (1 + docCount(t)) ) + 1
- *     score += keywordWeight(t) * idf
- *   score += outletWeight
- *   Rare, meaningful tokens (low docCount -> high idf) dominate, so the model
- *   learns *topics* rather than common filler. The more articles rated, the
- *   sharper the idf term and the more accurate ranking becomes.
+ * Seeding (initial interests):
+ *   The user can type seed keywords (e.g. "football, space"). Each is stored as a
+ *   GREEN-equivalent keyword weight so the TF-IDF scoring ranks matching stories
+ *   higher from day one — no ratings required. Seeds are merged with learned
+ *   weights, so once the user rates enough, their real feedback dominates.
  */
 class Recommender(private val dao: NewsDao) {
+
+    private val SEED_WEIGHT = 2.0 // equivalent to one GREEN rating per seed token
 
     private fun delta(rating: Rating): Double = when (rating) {
         Rating.GREEN -> 2.0
         Rating.AMBER -> 0.5
         Rating.RED -> -2.0
         Rating.NONE -> 0.0
+    }
+
+    /**
+     * Seed initial interests. Existing learned weights are preserved; seeds only
+     * ADD positive weight (they never push a keyword negative). Re-scores after.
+     */
+    suspend fun applySeeds(words: List<String>) {
+        val tokens = words.flatMap { Tokeniser.tokenise(it) }.toSet().filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return
+        val existing = dao.getKeywords(tokens).associateBy { it.keyword }
+        val updated = tokens.map { t ->
+            val cur = existing[t]
+            KeywordWeight(
+                keyword = t,
+                weight = maxOf(cur?.weight ?: 0.0, 0.0) + SEED_WEIGHT,
+                docCount = maxOf(cur?.docCount ?: 0, 1)
+            )
+        }
+        dao.upsertKeywords(updated)
+        rescoreAll()
     }
 
     /** Apply a user rating: update the article + learn keyword/outlet weights. */

@@ -6,7 +6,8 @@ package com.newsradar.app.weather
  * NOTE: BBC has no official public weather API — its endpoint is undocumented and
  * unstable, so we do NOT use it. Instead we use Open-Meteo (free, no API key) and
  * let the user choose the underlying forecast MODEL. The default is the UK Met
- * Office model, which is the same official data BBC Weather is based on.
+ * Office model, which is the same official data BBC Weather is based on. This app is
+ * UK-only, so all options are UK/Europe models.
  */
 enum class WeatherProvider(
     val id: String,
@@ -16,7 +17,6 @@ enum class WeatherProvider(
 ) {
     MET_OFFICE("met_office", "Met Office (UK)", "ukmo_seamless"),
     ECMWF("ecmwf", "ECMWF (Europe)", "ecmwf_ifs025"),
-    GFS("gfs", "GFS (Global/US)", "gfs_seamless"),
     BEST_MATCH("best_match", "Best match (auto)", null);
 
     companion object {

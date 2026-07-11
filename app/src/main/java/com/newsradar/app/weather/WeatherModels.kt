@@ -4,7 +4,18 @@ package com.newsradar.app.weather
 data class WeatherData(
     val locationName: String,
     val current: CurrentWeather,
-    val daily: List<DailyForecast>
+    val daily: List<DailyForecast>,
+    /** Hourly breakdown keyed by epoch day (for tapping a day to drill in). */
+    val hourlyByDay: Map<Long, List<HourlyPoint>> = emptyMap()
+)
+
+/** A single hour of the forecast. */
+data class HourlyPoint(
+    val hour: Int,          // 0-23
+    val tempC: Double,
+    val code: Int,
+    val emoji: String,
+    val precipProb: Int
 )
 
 data class CurrentWeather(
@@ -19,13 +30,15 @@ data class CurrentWeather(
 
 data class DailyForecast(
     val epochDay: Long,
-    val dayLabel: String,   // e.g. "Mon"
+    val dayLabel: String,   // e.g. "Mon 14 Jul"
     val minC: Double,
     val maxC: Double,
     val code: Int,
     val description: String,
     val emoji: String,
-    val precipProb: Int
+    val precipProb: Int,
+    val sunrise: String = "",   // ISO local time, e.g. "2026-07-11T05:03"
+    val sunset: String = ""     // ISO local time
 )
 
 /** WMO weather interpretation codes -> text + emoji. */

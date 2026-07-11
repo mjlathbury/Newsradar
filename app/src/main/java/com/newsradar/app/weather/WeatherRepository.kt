@@ -29,7 +29,13 @@ class WeatherRepository {
             g
         }
 
-        val data = client.forecast(geo, provider) ?: return Result.NetworkError
-        return Result.Success(data)
+        // Try the chosen model; if it fails (e.g. Met Office only covers the UK
+        // and the town resolved outside it), fall back to best-match once.
+        var data = client.forecast(geo, provider)
+        if (data == null && provider != WeatherProvider.BEST_MATCH) {
+            cachedGeo = null // allow a retry on next call
+            data = client.forecast(geo, WeatherProvider.BEST_MATCH)
+        }
+        return data?.let { Result.Success(it) } ?: Result.NetworkError
     }
 }

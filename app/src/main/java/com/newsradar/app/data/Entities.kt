@@ -23,7 +23,10 @@ data class Article(
     val fetchedAt: Long,
     val rating: String = Rating.NONE.name,
     // Cached relevance score for the current day's ranking.
-    val score: Double = 0.0
+    val score: Double = 0.0,
+    // On-demand: the article's body text, fetched only when the user taps
+    // "60s summary". Null until first requested (and cached afterwards).
+    val summaryText: String? = null
 )
 
 /** Learned weight for a single keyword (token). */

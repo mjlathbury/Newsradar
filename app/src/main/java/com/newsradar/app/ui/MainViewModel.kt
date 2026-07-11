@@ -3,10 +3,13 @@ package com.newsradar.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.newsradar.app.engine.Summarizer
+import com.newsradar.app.rss.ArticleFetcher
 import com.newsradar.app.data.Article
 import com.newsradar.app.data.NewsRepository
 import com.newsradar.app.data.Rating
 import com.newsradar.app.prefs.ColorScheme
+import com.newsradar.app.prefs.RatingDisplay
 import com.newsradar.app.prefs.SettingsStore
 import com.newsradar.app.prefs.ThemeMode
 import com.newsradar.app.weather.WeatherData
@@ -59,6 +62,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _greeting = MutableStateFlow(GreetingState())
     val greeting: StateFlow<GreetingState> = _greeting.asStateFlow()
 
+    /** State of an on-demand 60s summary: idle, loading, done (text), or failed. */
+    data class SummaryState(
+        val loading: Boolean = false,
+        val text: String? = null,
+        val error: Boolean = false
+    )
+
+    private val _summaries = MutableStateFlow<Map<String, SummaryState>>(emptyMap())
+    val summaries: StateFlow<Map<String, SummaryState>> = _summaries.asStateFlow()
+
+    /** Fetch + summarize an article's body on demand (only when the user asks). */
+    fun requestSummary(article: Article) {
+        val existing = _summaries.value[article.id]
+        if (existing?.loading == true || existing?.text != null) return // already done/running
+
+        viewModelScope.launch {
+            _summaries.value = _summaries.value + (article.id to SummaryState(loading = true))
+            // Use the cached body if present, else fetch it once.
+            val body = article.summaryText ?: ArticleFetcher.fetchText(article.link)
+            val result = if (body != null) {
+                val summary = withContext(Dispatchers.Default) { Summarizer.summarize(body) }
+                repo.cacheSummaryText(article.id, body)
+                SummaryState(text = summary)
+            } else {
+                SummaryState(error = true)
+            }
+            _summaries.value = _summaries.value + (article.id to result)
+        }
+    }
+
     private val _weather = MutableStateFlow(WeatherUiState())
     val weather: StateFlow<WeatherUiState> = _weather.asStateFlow()
 
@@ -75,6 +108,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settings.weatherProviderId.stateIn(viewModelScope, SharingStarted.Eagerly, "met_office")
     val weatherEnabled: StateFlow<Boolean> =
         settings.weatherEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val showImages: StateFlow<Boolean> =
+        settings.showImages.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val ratingDisplay: StateFlow<RatingDisplay> =
+        settings.ratingDisplay.stateIn(viewModelScope, SharingStarted.Eagerly, RatingDisplay.FULL)
+    val seedInterests: StateFlow<List<String>> =
+        settings.seedInterests.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val showDateBar: StateFlow<Boolean> =
+        settings.showDateBar.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val showSun: StateFlow<Boolean> =
+        settings.showSun.stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
     val outletStates = repo.observeOutletStates()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -236,5 +279,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settings.setWeatherEnabled(enabled)
         _weather.value = _weather.value.copy(enabled = enabled)
         if (enabled) loadWeather()
+    }
+    fun setShowImages(enabled: Boolean) = viewModelScope.launch {
+        settings.setShowImages(enabled)
+    }
+    fun setRatingDisplay(mode: RatingDisplay) = viewModelScope.launch {
+        settings.setRatingDisplay(mode)
+    }
+    fun setSeedInterests(words: List<String>) = viewModelScope.launch {
+        settings.setSeedInterests(words)
+        repo.applySeeds(words)
+    }
+    fun setShowDateBar(enabled: Boolean) = viewModelScope.launch {
+        settings.setShowDateBar(enabled)
+    }
+    fun setShowSun(enabled: Boolean) = viewModelScope.launch {
+        settings.setShowSun(enabled)
     }
 }

@@ -1,8 +1,10 @@
 package com.newsradar.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,13 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.SentimentDissatisfied
 import androidx.compose.material.icons.filled.SentimentNeutral
 import androidx.compose.material.icons.filled.SentimentSatisfied
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +39,8 @@ import com.newsradar.app.data.Article
 import com.newsradar.app.data.Outlets
 import com.newsradar.app.data.Paywall
 import com.newsradar.app.data.Rating
+import com.newsradar.app.ui.MainViewModel.SummaryState
+import com.newsradar.app.prefs.RatingDisplay
 import com.newsradar.app.ui.theme.RatingAmber
 import com.newsradar.app.ui.theme.RatingGreen
 import com.newsradar.app.ui.theme.RatingRed
@@ -42,6 +49,10 @@ import com.newsradar.app.ui.theme.RatingRed
 fun ArticleCard(
     article: Article,
     reasons: List<String>,
+    showImages: Boolean = true,
+    summary: SummaryState? = null,
+    onSummary: () -> Unit = {},
+    ratingDisplay: RatingDisplay = RatingDisplay.FULL,
     onOpen: (String) -> Unit,
     onRate: (Rating) -> Unit
 ) {
@@ -55,7 +66,7 @@ fun ArticleCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column {
-            if (!article.imageUrl.isNullOrBlank()) {
+            if (showImages && !article.imageUrl.isNullOrBlank()) {
                 AsyncImage(
                     model = article.imageUrl,
                     contentDescription = null,
@@ -115,33 +126,116 @@ fun ArticleCard(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Read full story ›",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { onOpen(article.link) }
-                )
-                Spacer(Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RateButton("Interested", RatingGreen, Icons.Filled.SentimentSatisfied,
-                        selected = current == Rating.GREEN, modifier = Modifier.weight(1f)) {
-                        onRate(Rating.GREEN)
+                    Text(
+                        text = "Read full story ›",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { onOpen(article.link) }
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable(enabled = summary?.loading != true) { onSummary() }
+                    ) {
+                        if (summary?.loading == true) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "Summarising…",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Article,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = if (summary?.text != null) "Hide summary" else "60s summary",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
-                    RateButton("Maybe", RatingAmber, Icons.Filled.SentimentNeutral,
-                        selected = current == Rating.AMBER, modifier = Modifier.weight(1f)) {
-                        onRate(Rating.AMBER)
+                }
+                AnimatedVisibility(visible = summary?.text != null) {
+                    Column(Modifier.padding(top = 10.dp)) {
+                        Text(
+                            "60-second overview",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = summary?.text ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
-                    RateButton("Not for me", RatingRed, Icons.Filled.SentimentDissatisfied,
-                        selected = current == Rating.RED, modifier = Modifier.weight(1f)) {
-                        onRate(Rating.RED)
+                }
+                AnimatedVisibility(visible = summary?.error == true) {
+                    Text(
+                        "Couldn't load the article text — tap \"Read full story\" instead.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp)
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                when (ratingDisplay) {
+                    RatingDisplay.FULL -> Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RateButton("Interested", RatingGreen, Icons.Filled.SentimentSatisfied,
+                            selected = current == Rating.GREEN, modifier = Modifier.weight(1f)) {
+                            onRate(Rating.GREEN)
+                        }
+                        RateButton("Maybe", RatingAmber, Icons.Filled.SentimentNeutral,
+                            selected = current == Rating.AMBER, modifier = Modifier.weight(1f)) {
+                            onRate(Rating.AMBER)
+                        }
+                        RateButton("Not for me", RatingRed, Icons.Filled.SentimentDissatisfied,
+                            selected = current == Rating.RED, modifier = Modifier.weight(1f)) {
+                            onRate(Rating.RED)
+                        }
                     }
+                    RatingDisplay.COLOUR -> Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RatingDot(RatingGreen, current == Rating.GREEN) { onRate(Rating.GREEN) }
+                        RatingDot(RatingAmber, current == Rating.AMBER) { onRate(Rating.AMBER) }
+                        RatingDot(RatingRed, current == Rating.RED) { onRate(Rating.RED) }
+                    }
+                    RatingDisplay.NONE -> { /* ratings hidden */ }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun RatingDot(color: Color, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(if (selected) 26.dp else 20.dp)
+            .clip(CircleShape)
+            .background(if (selected) color else color.copy(alpha = 0.35f))
+            .clickable { onClick() }
+    )
 }
 
 @Composable

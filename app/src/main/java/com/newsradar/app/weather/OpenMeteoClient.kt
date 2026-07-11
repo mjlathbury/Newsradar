@@ -8,6 +8,7 @@ import java.net.URL
 import java.net.URLEncoder
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
@@ -21,17 +22,21 @@ class OpenMeteoClient {
 
     data class Geo(val name: String, val lat: Double, val lon: Double)
 
+    /**
+     * Resolve a UK town to coordinates. The search is always scoped to Great
+     * Britain, so "Tamworth" -> Tamworth, Staffordshire (not Tamworth, Australia).
+     */
     suspend fun geocode(town: String): Geo? = withContext(Dispatchers.IO) {
         try {
             val q = URLEncoder.encode(town.trim(), "UTF-8")
             val url = "https://geocoding-api.open-meteo.com/v1/search" +
-                "?name=$q&count=1&language=en&format=json"
+                "?name=$q&countryCode=GB&count=5&language=en&format=json"
             val json = getJson(url) ?: return@withContext null
             val results = json.optJSONArray("results") ?: return@withContext null
             if (results.length() == 0) return@withContext null
             val r = results.getJSONObject(0)
-            val country = r.optString("country", "")
             val admin = r.optString("admin1", "")
+            val country = r.optString("country", "")
             val display = listOf(r.optString("name"), admin, country)
                 .filter { it.isNotBlank() }.joinToString(", ")
             Geo(display, r.getDouble("latitude"), r.getDouble("longitude"))
@@ -49,7 +54,8 @@ class OpenMeteoClient {
                 "&current=temperature_2m,apparent_temperature,relative_humidity_2m," +
                 "weather_code,wind_speed_10m" +
                 "&daily=weather_code,temperature_2m_max,temperature_2m_min," +
-                "precipitation_probability_max" +
+                "precipitation_probability_max,sunrise,sunset" +
+                "&hourly=temperature_2m,weather_code,precipitation_probability" +
                 "&timezone=auto&forecast_days=7&wind_speed_unit=kmh" + modelParam
             val json = getJson(url) ?: return@withContext null
 
@@ -74,6 +80,8 @@ class OpenMeteoClient {
                 val maxT = d.getJSONArray("temperature_2m_max")
                 val minT = d.getJSONArray("temperature_2m_min")
                 val pop = d.optJSONArray("precipitation_probability_max")
+                val sunUp = d.optJSONArray("sunrise")
+                val sunDown = d.optJSONArray("sunset")
                 for (i in 0 until times.length()) {
                     val date = LocalDate.parse(times.getString(i))
                     val code = codes.getInt(i)
@@ -82,18 +90,47 @@ class OpenMeteoClient {
                         DailyForecast(
                             epochDay = date.toEpochDay(),
                             dayLabel = date.dayOfWeek
-                                .getDisplayName(TextStyle.SHORT, Locale.getDefault()),
+                                .getDisplayName(TextStyle.SHORT, Locale.getDefault()) + " " +
+                                date.dayOfMonth + " " +
+                                date.month.getDisplayName(TextStyle.SHORT, Locale.getDefault()),
                             minC = minT.getDouble(i),
                             maxC = maxT.getDouble(i),
                             code = code,
                             description = desc,
                             emoji = emoji,
-                            precipProb = pop?.optInt(i) ?: 0
+                            precipProb = pop?.optInt(i) ?: 0,
+                            sunrise = sunUp?.optString(i) ?: "",
+                            sunset = sunDown?.optString(i) ?: ""
                         )
                     )
                 }
             }
-            WeatherData(locationName = geo.name, current = current, daily = daily)
+            // Group hourly points by their epoch day for the day drill-down.
+            val hourlyByDay = mutableMapOf<Long, MutableList<HourlyPoint>>()
+            json.optJSONObject("hourly")?.let { h ->
+                val hTimes = h.optJSONArray("time")
+                val hTemps = h.optJSONArray("temperature_2m")
+                val hCodes = h.optJSONArray("weather_code")
+                val hPop = h.optJSONArray("precipitation_probability")
+                for (i in 0 until (hTimes?.length() ?: 0)) {
+                    val dt = LocalDateTime.parse(hTimes!!.getString(i))
+                    val day = dt.toLocalDate().toEpochDay()
+                    val pt = HourlyPoint(
+                        hour = dt.hour,
+                        tempC = hTemps?.optDouble(i) ?: 0.0,
+                        code = hCodes?.optInt(i) ?: 0,
+                        emoji = WmoCodes.describe(hCodes?.optInt(i) ?: 0).second,
+                        precipProb = hPop?.optInt(i) ?: 0
+                    )
+                    hourlyByDay.getOrPut(day) { mutableListOf() }.add(pt)
+                }
+            }
+            WeatherData(
+                locationName = geo.name,
+                current = current,
+                daily = daily,
+                hourlyByDay = hourlyByDay
+            )
           } catch (e: Exception) {
             null
           }
