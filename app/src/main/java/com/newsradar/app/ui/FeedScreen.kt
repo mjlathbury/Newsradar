@@ -1,0 +1,139 @@
+package com.newsradar.app.ui
+
+import android.content.Intent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import com.newsradar.app.data.Rating
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
+    val state by vm.feed.collectAsState()
+    val greeting by vm.greeting.collectAsState()
+    val weather by vm.weather.collectAsState()
+    val context = LocalContext.current
+
+    GreetingDialog(state = greeting, onDismiss = { vm.dismissGreeting() })
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("NewsRadar") },
+                actions = {
+                    IconButton(onClick = { vm.refreshNow() }) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
+                }
+            )
+        }
+    ) { pad ->
+        Column(Modifier.fillMaxSize().padding(pad)) {
+            // Weather bar pinned at the very top (below the app bar).
+            WeatherBar(state = weather)
+
+            Box(Modifier.fillMaxSize()) {
+                when {
+                    state.loading && state.articles.isEmpty() ->
+                        CircularProgressIndicator(Modifier.align(Alignment.Center))
+
+                    state.articles.isEmpty() -> EmptyState(
+                        refreshing = state.refreshing,
+                        error = state.error,
+                        onRefresh = { vm.refreshNow() }
+                    )
+
+                    else -> LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 6.dp)
+                    ) {
+                        items(state.articles, key = { it.id }) { article ->
+                            ArticleCard(
+                                article = article,
+                                reasons = state.reasons[article.id].orEmpty(),
+                                onOpen = { url ->
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
+                                    } catch (e: android.content.ActivityNotFoundException) {
+                                        // No browser available; silently ignore.
+                                    }
+                                },
+                                onRate = { rating: Rating -> vm.rate(article, rating) }
+                            )
+                        }
+                        item {
+                            Column(
+                                Modifier.fillMaxWidth().padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (state.canLoadMore) {
+                                    Button(onClick = { vm.loadMore() }) { Text("Load more articles") }
+                                } else {
+                                    Text(
+                                        "You're all caught up.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (state.refreshing) {
+                    CircularProgressIndicator(Modifier.align(Alignment.TopCenter).padding(top = 8.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(refreshing: Boolean, error: String?, onRefresh: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            error ?: "No stories yet. Pull the latest UK headlines to get started.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Column(Modifier.padding(top = 16.dp)) {
+            if (refreshing) CircularProgressIndicator()
+            else OutlinedButton(onClick = onRefresh) { Text("Fetch today's news") }
+        }
+    }
+}

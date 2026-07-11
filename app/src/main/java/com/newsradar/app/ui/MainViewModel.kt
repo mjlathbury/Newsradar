@@ -1,0 +1,240 @@
+package com.newsradar.app.ui
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.newsradar.app.data.Article
+import com.newsradar.app.data.NewsRepository
+import com.newsradar.app.data.Rating
+import com.newsradar.app.prefs.ColorScheme
+import com.newsradar.app.prefs.SettingsStore
+import com.newsradar.app.prefs.ThemeMode
+import com.newsradar.app.weather.WeatherData
+import com.newsradar.app.weather.WeatherProvider
+import com.newsradar.app.weather.WeatherRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.TextStyle
+import java.util.Locale
+
+data class FeedUiState(
+    val articles: List<Article> = emptyList(),
+    val reasons: Map<String, List<String>> = emptyMap(),
+    val loading: Boolean = false,
+    val refreshing: Boolean = false,
+    val page: Int = 0,
+    val canLoadMore: Boolean = true,
+    val error: String? = null
+)
+
+data class GreetingState(
+    val show: Boolean = false,
+    val greeting: String = "",
+    val dateLine: String = ""
+)
+
+data class WeatherUiState(
+    val enabled: Boolean = true,
+    val loading: Boolean = false,
+    val data: WeatherData? = null,
+    val message: String? = null
+)
+
+class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val repo = NewsRepository.get(app)
+    private val settings = SettingsStore(app)
+    private val weatherRepo = WeatherRepository()
+
+    private val _feed = MutableStateFlow(FeedUiState())
+    val feed: StateFlow<FeedUiState> = _feed.asStateFlow()
+
+    private val _greeting = MutableStateFlow(GreetingState())
+    val greeting: StateFlow<GreetingState> = _greeting.asStateFlow()
+
+    private val _weather = MutableStateFlow(WeatherUiState())
+    val weather: StateFlow<WeatherUiState> = _weather.asStateFlow()
+
+    val themeMode: StateFlow<ThemeMode> =
+        settings.themeMode.stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
+    val colorScheme: StateFlow<ColorScheme> =
+        settings.colorScheme.stateIn(viewModelScope, SharingStarted.Eagerly, ColorScheme.BLUE)
+
+    private val _userName = MutableStateFlow("")
+    val userName: StateFlow<String> = _userName.asStateFlow()
+    private val _town = MutableStateFlow("")
+    val town: StateFlow<String> = _town.asStateFlow()
+    val weatherProviderId: StateFlow<String> =
+        settings.weatherProviderId.stateIn(viewModelScope, SharingStarted.Eagerly, "met_office")
+    val weatherEnabled: StateFlow<Boolean> =
+        settings.weatherEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val outletStates = repo.observeOutletStates()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    init {
+        viewModelScope.launch { repo.ensureOutletStates() }
+        viewModelScope.launch {
+            _userName.value = settings.userName.first()
+            _town.value = settings.town.first()
+            loadWeather()
+        }
+        loadFirstPage()
+        showGreeting()
+    }
+
+    // ---- Greeting ----
+    private fun showGreeting() {
+        viewModelScope.launch {
+            val name = settings.userName.first()
+            val now = LocalTime.now()
+            val part = when (now.hour) {
+                in 5..11 -> "Good Morning"
+                in 12..17 -> "Good Afternoon"
+                else -> "Good Evening"
+            }
+            val greet = if (name.isBlank()) part else "$part, $name"
+            val today = LocalDate.now()
+            val dow = today.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())
+            val month = today.month.getDisplayName(TextStyle.FULL, Locale.getDefault())
+            val dateLine = "$dow, ${today.dayOfMonth} $month ${today.year}"
+            _greeting.value = GreetingState(show = true, greeting = greet, dateLine = dateLine)
+        }
+    }
+
+    fun dismissGreeting() {
+        _greeting.value = _greeting.value.copy(show = false)
+    }
+
+    // ---- Weather ----
+    fun loadWeather() {
+        viewModelScope.launch {
+            val enabled = settings.weatherEnabled.first()
+            _weather.value = _weather.value.copy(enabled = enabled)
+            if (!enabled) return@launch
+
+            val townName = _town.value
+            val provider = WeatherProvider.byId(settings.weatherProviderId.first())
+            _weather.value = _weather.value.copy(loading = true, message = null)
+
+            when (val r = weatherRepo.load(townName, provider)) {
+                is WeatherRepository.Result.Success ->
+                    _weather.value = WeatherUiState(enabled = true, data = r.data)
+                WeatherRepository.Result.NoTown ->
+                    _weather.value = WeatherUiState(enabled = true,
+                        message = "Set your town in Settings to see weather.")
+                WeatherRepository.Result.TownNotFound ->
+                    _weather.value = WeatherUiState(enabled = true,
+                        message = "Couldn't find that town. Check the spelling in Settings.")
+                WeatherRepository.Result.NetworkError ->
+                    _weather.value = WeatherUiState(enabled = true,
+                        message = "Weather unavailable right now.")
+            }
+        }
+    }
+
+    // ---- Feed ----
+    fun loadFirstPage() {
+        viewModelScope.launch {
+            _feed.value = _feed.value.copy(loading = true, page = 0)
+            val first = repo.getFeedPage(0)
+            if (first.isEmpty()) {
+                refreshNow() // Auto-pull on first run so the feed is never empty.
+            } else {
+                _feed.value = FeedUiState(
+                    articles = first,
+                    reasons = buildReasons(first),
+                    loading = false,
+                    page = 0,
+                    canLoadMore = first.size == 5
+                )
+            }
+        }
+    }
+
+    fun loadMore() {
+        val s = _feed.value
+        if (s.loading || !s.canLoadMore) return
+        viewModelScope.launch {
+            val nextPage = s.page + 1
+            val more = repo.getFeedPage(nextPage)
+            _feed.value = s.copy(
+                articles = s.articles + more,
+                reasons = s.reasons + buildReasons(more),
+                page = nextPage,
+                canLoadMore = more.size == 5
+            )
+        }
+    }
+
+    fun refreshNow() {
+        viewModelScope.launch {
+            _feed.value = _feed.value.copy(refreshing = true, error = null)
+            try {
+                repo.refresh()
+                val first = repo.getFeedPage(0)
+                _feed.value = FeedUiState(
+                    articles = first,
+                    reasons = buildReasons(first),
+                    page = 0,
+                    canLoadMore = first.size == 5
+                )
+            } catch (e: Exception) {
+                _feed.value = _feed.value.copy(
+                    refreshing = false,
+                    error = "Couldn't refresh. Check your connection."
+                )
+            }
+            loadWeather()
+        }
+    }
+
+    fun rate(article: Article, rating: Rating) {
+        viewModelScope.launch {
+            repo.rate(article, rating)
+            val updated = if (rating == Rating.RED) {
+                _feed.value.articles.filterNot { it.id == article.id }
+            } else {
+                _feed.value.articles.map {
+                    if (it.id == article.id) it.copy(rating = rating.name) else it
+                }
+            }
+            _feed.value = _feed.value.copy(articles = updated)
+        }
+    }
+
+    private suspend fun buildReasons(list: List<Article>): Map<String, List<String>> =
+        list.associate { it.id to repo.reasonsFor(it) }
+
+    // ---- Settings actions ----
+    fun setTheme(mode: ThemeMode) = viewModelScope.launch { settings.setThemeMode(mode) }
+    fun setScheme(scheme: ColorScheme) = viewModelScope.launch { settings.setColorScheme(scheme) }
+    fun setOutletEnabled(id: String, enabled: Boolean) =
+        viewModelScope.launch { repo.setOutletEnabled(id, enabled) }
+
+    fun setUserName(name: String) {
+        _userName.value = name
+        viewModelScope.launch { settings.setUserName(name) }
+    }
+    fun setTown(t: String) {
+        _town.value = t
+        viewModelScope.launch { settings.setTown(t) }
+        loadWeather()
+    }
+    fun setWeatherProvider(id: String) = viewModelScope.launch {
+        settings.setWeatherProvider(id)
+        loadWeather()
+    }
+    fun setWeatherEnabled(enabled: Boolean) = viewModelScope.launch {
+        settings.setWeatherEnabled(enabled)
+        _weather.value = _weather.value.copy(enabled = enabled)
+        if (enabled) loadWeather()
+    }
+}
