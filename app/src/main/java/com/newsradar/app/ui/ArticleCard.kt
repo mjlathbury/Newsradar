@@ -140,7 +140,7 @@ fun ArticleCard(
                         onClick = { onOpen(article.link) }
                     )
                     ModernPill(
-                        text = "60s summary",
+                        text = "Brief Summary",
                         icon = Icons.AutoMirrored.Filled.Article,
                         filled = false,
                         loading = summary?.loading == true,

@@ -90,6 +90,8 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         readerMode = mode
         readerVideo = false
         readerOpen = true
+        // Brief Summary auto-generates as soon as the window opens.
+        if (mode == ReaderMode.SUMMARY) vm.requestSummary(a)
     }
 
     fun openVideo(name: String, url: String) {
@@ -100,16 +102,22 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         readerMode = ReaderMode.WEB
         readerVideo = true
         readerOpen = true
-        // Force landscape for video; restore on close.
-        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Landscape is applied in a LaunchedEffect (after composition) to avoid
+        // colliding with WebView init, which could crash the activity.
+    }
+
+    // Force landscape only while a video window is open; restore previous on close.
+    androidx.compose.runtime.LaunchedEffect(readerOpen, readerVideo) {
+        if (readerOpen && readerVideo) {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     // Device Back closes the reader overlay instead of exiting.
     androidx.activity.compose.BackHandler(enabled = readerOpen) {
         readerOpen = false
-        if (readerVideo) {
-            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
     }
 
     var menuExpanded by remember { mutableStateOf(false) }

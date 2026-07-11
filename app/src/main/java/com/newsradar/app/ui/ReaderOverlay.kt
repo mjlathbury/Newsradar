@@ -12,7 +12,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +29,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
@@ -223,7 +221,12 @@ private fun WebReader(
                         // Let video autoplay (muted) without a tap.
                         mediaPlaybackRequiresUserGesture = !videoMode
                     }
-                    loadUrl(url)
+                    try {
+                        loadUrl(url)
+                    } catch (e: Exception) {
+                        // A failed load must not crash the app — leave the spinner off.
+                        loading = false
+                    }
                 }
             },
             onRelease = { it.destroy() }
@@ -249,7 +252,7 @@ private fun SummaryReader(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            "60-second overview",
+            "Brief summary",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.tertiary
@@ -257,7 +260,7 @@ private fun SummaryReader(
         when {
             loading -> CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
             error -> Text(
-                "Couldn't build the summary from this article. Open the full story instead.",
+                "Couldn't build the summary from this article. Close and try again.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -266,29 +269,7 @@ private fun SummaryReader(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            else -> TextButton(onClick = onRequest) { Text("Generate 60s summary") }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .clickable { onOpenFull() }
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Icon(
-                Icons.Filled.OpenInBrowser,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "Open full article in this window",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+            else -> TextButton(onClick = onRequest) { Text("Generate brief summary") }
         }
     }
 }
