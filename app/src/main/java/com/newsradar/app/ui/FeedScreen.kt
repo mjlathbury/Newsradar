@@ -78,6 +78,9 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     var readerTitle by remember { mutableStateOf("") }
     var readerOutlet by remember { mutableStateOf("") }
     var readerMode by remember { mutableStateOf(ReaderMode.WEB) }
+    var readerVideo by remember { mutableStateOf(false) }
+
+    val activity = (LocalContext.current as? android.app.Activity)
 
     fun openArticle(a: com.newsradar.app.data.Article, mode: ReaderMode) {
         readerArticle = a
@@ -85,6 +88,7 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         readerTitle = a.title
         readerOutlet = a.outletName
         readerMode = mode
+        readerVideo = false
         readerOpen = true
     }
 
@@ -94,12 +98,18 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         readerTitle = name
         readerOutlet = name
         readerMode = ReaderMode.WEB
+        readerVideo = true
         readerOpen = true
+        // Force landscape for video; restore on close.
+        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
     }
 
     // Device Back closes the reader overlay instead of exiting.
     androidx.activity.compose.BackHandler(enabled = readerOpen) {
         readerOpen = false
+        if (readerVideo) {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
     }
 
     var menuExpanded by remember { mutableStateOf(false) }
@@ -240,12 +250,18 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                     title = readerTitle,
                     outlet = readerOutlet,
                     mode = readerMode,
+                    videoMode = readerVideo,
                     summaryText = readerArticle?.let { summaries[it.id]?.text },
                     summaryLoading = readerArticle?.let { summaries[it.id]?.loading == true } == true,
                     summaryError = readerArticle?.let { summaries[it.id]?.error == true } == true,
                     onRequestSummary = { readerArticle?.let { vm.requestSummary(it) } },
                     onSwitchToWeb = { readerMode = ReaderMode.WEB },
-                    onClose = { readerOpen = false }
+                    onClose = {
+                        readerOpen = false
+                        if (readerVideo) {
+                            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        }
+                    }
                 )
             }
         }
