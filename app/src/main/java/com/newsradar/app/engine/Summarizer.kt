@@ -21,10 +21,10 @@ object Summarizer {
     )
 
     /** Produce a ~60 second overview: up to [maxSentences] key sentences. */
-    fun summarize(text: String, maxSentences: Int = 5): String {
-        val sentences = text.split(Regex("(?<=[.!?])\\s+"))
+    fun summarize(text: String, maxSentences: Int = 12): String {
+        val sentences = text.split(Regex("(?<=.?!)\\s+"))
             .map { it.trim() }
-            .filter { it.length > 25 }
+            .filter { it.length > 30 }
         if (sentences.size <= maxSentences) return sentences.joinToString(" ")
 
         // Word frequency across the whole text.

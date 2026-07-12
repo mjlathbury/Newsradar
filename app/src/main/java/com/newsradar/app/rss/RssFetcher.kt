@@ -45,7 +45,14 @@ class RssFetcher {
                 Article(
                     id = hash(link),
                     title = title,
-                    summary = cleanHtml(item.description ?: item.content ?: ""),
+                    // Prefer the fuller of description/content so the Brief Summary has
+                    // enough source text for a ~60s read (some feeds put the full
+                    // article in content:encoded, others only a short description).
+                    summary = run {
+                        val desc = cleanHtml(item.description ?: "")
+                        val content = cleanHtml(item.content ?: "")
+                        (if (content.length > desc.length) content else desc).take(3000)
+                    },
                     link = link,
                     imageUrl = item.image ?: item.itunesItemData?.image,
                     outletId = outlet.id,
