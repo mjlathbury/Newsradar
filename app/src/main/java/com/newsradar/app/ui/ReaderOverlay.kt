@@ -5,11 +5,6 @@ import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,15 +16,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,19 +44,20 @@ import androidx.compose.ui.viewinterop.AndroidView
 enum class ReaderMode { WEB, SUMMARY }
 
 /**
- * always visible — the ✕ (close) button top-right never scrolls away. Closing
- * returns to the feed. The device Back button also closes it (handled by the
- * caller via BackHandler, or here if used standalone).
+ * In-app reader overlay. The top bar (outlet + headline + close) is always
+ * visible — the ✕ (close) button top-right never scrolls away. Closing returns
+ * to the feed. The device Back button also closes it (handled by the caller via
+ * BackHandler).
  *
- * @param url        the URL to load (article link or external video page).
- * @param title      headline / programme name shown in the top bar.
- * @param outlet     source name shown in the top bar (uppercased).
- * @param mode       WEB shows the page in a WebView; SUMMARY shows the on-device
- *                   60s overview (passed in [summaryText]).
- * @param summaryText pre-fetched summary text (null while loading / on error).
+ * @param url           the article URL to load in the WebView.
+ * @param title         headline shown in the top bar.
+ * @param outlet        source name shown in the top bar (uppercased).
+ * @param mode          WEB shows the page in a WebView; SUMMARY shows the on-device
+ *                      60s overview (passed in [summaryText]).
+ * @param summaryText   pre-fetched summary text (null while loading / on error).
  * @param summaryLoading true while the summary is being generated.
- * @param summaryError true if summary generation failed.
- * @param onClose     dismissed the overlay.
+ * @param summaryError  true if summary generation failed.
+ * @param onClose       dismissed the overlay.
  */
 @Composable
 fun ReaderOverlay(
@@ -72,16 +65,11 @@ fun ReaderOverlay(
     title: String,
     outlet: String,
     mode: ReaderMode,
-    videoMode: Boolean = false,
     summaryText: String? = null,
     summaryLoading: Boolean = false,
     summaryError: Boolean = false,
     onClose: () -> Unit
 ) {
-    // Mute state for video windows (starts muted so autoplay is allowed).
-    var muted by remember { mutableStateOf(true) }
-    val webViewRef = remember { mutableStateOf<WebView?>(null) }
-
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         // ---- Sticky top bar (always visible) ----
         Column(Modifier.fillMaxWidth()) {
@@ -106,38 +94,6 @@ fun ReaderOverlay(
                         maxLines = 1
                     )
                 }
-                if (videoMode) {
-                    // Flashing amber button while muted; green when audio is on.
-                    val flash = rememberInfiniteTransition()
-                    val alpha by flash.animateFloat(
-                        initialValue = 1f, targetValue = 0.35f,
-                        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse)
-                    )
-                    IconButton(
-                        onClick = {
-                            // For YouTube embeds, muting requires reloading the iframe
-                            // with the mute query param — evaluateJavascript can't reach
-                            // the cross-origin player's <video>. Reload with flipped param.
-                            muted = !muted
-                            val sep = if (url.contains("?")) "&" else "?"
-                            webViewRef.value?.loadUrl("$url${sep}mute=${if (muted) 1 else 0}")
-                        },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                if (muted) MaterialTheme.colorScheme.errorContainer.copy(alpha = alpha)
-                                else MaterialTheme.colorScheme.primaryContainer
-                            )
-                    ) {
-                        Icon(
-                            if (muted) Icons.Filled.VolumeOff else Icons.Filled.VolumeUp,
-                            contentDescription = if (muted) "Unmute" else "Mute",
-                            tint = if (muted) MaterialTheme.colorScheme.onErrorContainer
-                                   else MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
                 IconButton(onClick = onClose, modifier = Modifier.size(40.dp)) {
                     Icon(
                         Icons.Filled.Close,
@@ -155,7 +111,7 @@ fun ReaderOverlay(
         // ---- Body (below the sticky bar) ----
         Box(Modifier.fillMaxSize().padding(top = 57.dp)) {
             when (mode) {
-                ReaderMode.WEB -> WebReader(url, videoMode, webViewRef)
+                ReaderMode.WEB -> WebReader(url)
                 ReaderMode.SUMMARY -> SummaryReader(
                     summaryText = summaryText,
                     loading = summaryLoading,
@@ -166,15 +122,10 @@ fun ReaderOverlay(
     }
 }
 
-/** WebView that loads the URL with a progress spinner. For [videoMode] it allows
- *  autoplay without a user gesture (so muted autoplay works) and exposes the
- *  WebView via [webViewRef] so the mute toggle can adjust volume. */
+/** WebView that loads the article URL with a progress spinner. Navigation stays
+ *  inside the overlay (no external browser). */
 @Composable
-private fun WebReader(
-    url: String,
-    videoMode: Boolean = false,
-    webViewRef: androidx.compose.runtime.MutableState<WebView?>? = null
-) {
+private fun WebReader(url: String) {
     var loading by remember { mutableStateOf(true) }
     Box(Modifier.fillMaxSize()) {
         AndroidView(
@@ -185,7 +136,6 @@ private fun WebReader(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                    webViewRef?.value = this
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             loading = true
@@ -204,15 +154,9 @@ private fun WebReader(
                         domStorageEnabled = true
                         loadWithOverviewMode = true
                         useWideViewPort = true
-                        // Let video autoplay (muted) without a tap.
-                        mediaPlaybackRequiresUserGesture = !videoMode
                     }
                     try {
-                        // YouTube embeds: append autoplay + initial mute so the stream
-                        // starts playing silently (sound-on autoplay is blocked).
-                        val sep = if (url.contains("?")) "&" else "?"
-                        val finalUrl = if (videoMode) "$url${sep}autoplay=1&mute=1" else url
-                        loadUrl(finalUrl)
+                        loadUrl(url)
                     } catch (e: Exception) {
                         // A failed load must not crash the app — leave the spinner off.
                         loading = false

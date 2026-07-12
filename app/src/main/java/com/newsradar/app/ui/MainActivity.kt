@@ -59,11 +59,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Re-pull the feed when returning to the foreground, but only if it's stale
-    // (>15 min) so we don't hammer RSS endpoints on every resume (e.g. closing
-    // the notification shade). Timestamps/age-colours stay current without abuse.
+    // Show the welcome/greeting popup whenever the app is opened (incl. returning
+    // to the foreground), and re-pull the feed only if it's stale (>15 min) so we
+    // don't hammer RSS endpoints on every resume (e.g. closing the notification
+    // shade). Timestamps/age-colours stay current without abuse.
+    private var firstResume = true
     override fun onResume() {
         super.onResume()
-        if (::vm.isInitialized) vm.refreshIfStale()
+        if (::vm.isInitialized) {
+            if (firstResume) firstResume = false else vm.showGreeting()
+            vm.refreshIfStale()
+        }
     }
 }

@@ -74,6 +74,10 @@ dependencies {
     // jsoup (on-demand article text extraction for the 60s summary)
     implementation("org.jsoup:jsoup:1.18.1")
 
+    // Readability4J — offline Mozilla Readability port; universal article-body
+    // extraction fallback when per-site selectors miss. Wraps Jsoup.
+    implementation("net.dankito.readability4j:readability4j:1.0.8")
+
     // Android WebView (in-app reader overlay)
     implementation("androidx.webkit:webkit:1.11.0")
 

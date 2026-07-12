@@ -15,7 +15,7 @@ import java.util.Locale
  * [lastCrash] so the Settings "Debug" section can show it for copy/paste.
  *
  * No third-party SDK — just the raw throwable text, which is exactly what's needed
- * to diagnose a crash (e.g. the video WebView) without a Google account.
+ * to diagnose a crash without a Google account.
  */
 object CrashLogger {
 

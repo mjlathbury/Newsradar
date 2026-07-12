@@ -1,6 +1,5 @@
 package com.newsradar.app.ui
 
-import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -44,25 +42,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
 import com.newsradar.app.data.Rating
 import com.newsradar.app.ui.ReaderOverlay
 import com.newsradar.app.ui.ReaderMode
-
-/**
- * In-app live video via each outlet's official YouTube channel, played in the
- * YouTube IFrame *embed* player (clean fullscreen, no site chrome). Using
- * `embed/live_stream?channel=ID` resolves to that channel's current live broadcast
- * and renders as a proper fullscreen player. Verified reachable (HTTP 200) for
- * BBC / Sky / LBC.
- */
-private val VIDEO_SOURCES = listOf(
-    VideoSource("BBC News", "https://www.youtube.com/embed/live_stream?channel=UC16niRr50-MSBwiO3YDb3RA&autoplay=1&mute=1"),
-    VideoSource("Sky News", "https://www.youtube.com/embed/live_stream?channel=UCky1dE_V6Vml3HAvFcPXMIw&autoplay=1&mute=1")
-)
-
-private data class VideoSource(val name: String, val url: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -83,9 +66,6 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     var readerTitle by remember { mutableStateOf("") }
     var readerOutlet by remember { mutableStateOf("") }
     var readerMode by remember { mutableStateOf(ReaderMode.WEB) }
-    var readerVideo by remember { mutableStateOf(false) }
-
-    val activity = (LocalContext.current as? android.app.Activity)
 
     fun openArticle(a: com.newsradar.app.data.Article, mode: ReaderMode) {
         readerArticle = a
@@ -93,31 +73,9 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
         readerTitle = a.title
         readerOutlet = a.outletName
         readerMode = mode
-        readerVideo = false
         readerOpen = true
         // Brief Summary auto-generates as soon as the window opens.
         if (mode == ReaderMode.SUMMARY) vm.requestSummary(a)
-    }
-
-    fun openVideo(name: String, url: String) {
-        readerArticle = null
-        readerUrl = url
-        readerTitle = name
-        readerOutlet = name
-        readerMode = ReaderMode.WEB
-        readerVideo = true
-        readerOpen = true
-        // Landscape is applied in a LaunchedEffect (after composition) to avoid
-        // colliding with WebView init, which could crash the activity.
-    }
-
-    // Force landscape only while a video window is open; restore previous on close.
-    androidx.compose.runtime.LaunchedEffect(readerOpen, readerVideo) {
-        if (readerOpen && readerVideo) {
-            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        } else {
-            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-        }
     }
 
     // Device Back closes the reader overlay instead of exiting.
@@ -238,22 +196,6 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                             scope.launch { listState.scrollToItem(0) }
                         }
                     )
-                    HorizontalDivider()
-                    Text(
-                        "Video",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp)
-                    )
-                    VIDEO_SOURCES.forEach { src ->
-                        DropdownMenuItem(
-                            text = { Text(src.name) },
-                            onClick = {
-                                menuExpanded = false
-                                openVideo(src.name, src.url)
-                            }
-                        )
-                    }
                 }
             }
 
@@ -263,19 +205,17 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                     title = readerTitle,
                     outlet = readerOutlet,
                     mode = readerMode,
-                    videoMode = readerVideo,
                     summaryText = readerArticle?.let { summaries[it.id]?.text ?: it.summary },
                     summaryLoading = readerArticle?.let { summaries[it.id]?.loading == true } == true,
                     summaryError = readerArticle?.let { summaries[it.id]?.error == true } == true,
-                    onClose = {
-                        readerOpen = false
-                        if (readerVideo) {
-                            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                        }
-                    }
+                    onClose = { readerOpen = false }
                 )
             }
         }
+
+        // Welcome popup (time-of-day greeting + name + date) — shown whenever the
+        // app is opened (driven from MainActivity.onResume via vm.showGreeting()).
+        GreetingDialog(state = greeting, onDismiss = vm::dismissGreeting)
     }
 }
 

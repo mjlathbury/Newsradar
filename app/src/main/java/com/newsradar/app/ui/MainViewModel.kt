@@ -177,7 +177,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Greeting ----
-    private fun showGreeting() {
+    fun showGreeting() {
         viewModelScope.launch {
             val name = settings.userName.first()
             val now = LocalTime.now()
