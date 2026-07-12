@@ -3,8 +3,8 @@ package com.newsradar.app.rss
 import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jsoup.Jsoup
@@ -160,13 +160,13 @@ object ArticleFetcher {
         if (context == null) return null
         return withTimeoutOrNull(10_000) {
             withContext(Dispatchers.Main) {
-                suspendCoroutine<String?> { cont ->
-                    val cancellable = cont as kotlinx.coroutines.CancellableContinuation<String?>
+                suspendCancellableCoroutine<String?> { cont ->
                     val webView = WebView(context).apply {
                         settings.javaScriptEnabled = true
                         settings.blockNetworkImage = true
                         settings.domStorageEnabled = true
                     }
+                    cont.invokeOnCancellation { webView.destroy() }
                     webView.webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                             super.onPageFinished(view, loadedUrl)
@@ -175,7 +175,7 @@ object ArticleFetcher {
                                     ?.replace("\\n", "\n")
                                     ?.replace("\\u003C", "<")
                                     ?.trim()
-                                if (cancellable.isActive) cancellable.resume(clean, onCancellation = {})
+                                if (cont.isActive) cont.resume(clean, onCancellation = {})
                                 view?.destroy()
                             }
                         }
@@ -185,7 +185,7 @@ object ArticleFetcher {
                             request: android.webkit.WebResourceRequest?,
                             error: android.webkit.WebResourceError?
                         ) {
-                            if (cancellable.isActive) cancellable.resume(null, onCancellation = {})
+                            if (cont.isActive) cont.resume(null, onCancellation = {})
                             view?.destroy()
                         }
                     }
