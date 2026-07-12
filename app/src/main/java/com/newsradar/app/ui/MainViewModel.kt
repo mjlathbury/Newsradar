@@ -81,17 +81,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _summaries.value = _summaries.value + (article.id to SummaryState(loading = true))
-            // Prefer the RSS blurb (article.summary) — it's already captured for every
-            // outlet, needs no network, and never 404s. If the blurb is too short for a
-            // proper ~60s read, try a full-page fetch as an enhancement; fall back to
-            // the blurb if the fetch fails (never show "Couldn't build" when we have text).
+            // Always prefer the full article body when we can fetch it — the RSS
+            // blurb is only a short lede, which yields a too-brief summary for
+            // outlets like the Guardian/Mirror. Fall back to the blurb only if the
+            // fetch fails (never show "Couldn't build" when we have text).
             val blurb = article.summary
-            val body = if (blurb.length >= 400) {
-                blurb
-            } else {
-                ArticleFetcher.fetchText(article.link) ?: blurb
+            val fetched = ArticleFetcher.fetchText(article.link)
+            val body = when {
+                fetched != null && fetched.length > blurb.length -> fetched
+                blurb.isNotBlank() -> blurb
+                else -> fetched
             }
-            val result = if (body != null) {
+            val result = if (body != null && body.isNotBlank()) {
                 val summary = withContext(Dispatchers.Default) { Summarizer.summarize(body) }
                 SummaryState(text = summary)
             } else {

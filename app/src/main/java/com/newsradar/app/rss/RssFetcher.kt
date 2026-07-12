@@ -4,6 +4,7 @@ import com.newsradar.app.data.Article
 import com.newsradar.app.data.Outlet
 import com.newsradar.app.data.Outlets
 import com.prof18.rssparser.RssParserBuilder
+import org.jsoup.Jsoup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -64,15 +65,17 @@ class RssFetcher {
             }
         }
 
-    private fun cleanHtml(s: String): String =
-        s.replace(HTML_TAGS, "")
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&#39;", "'")
-            .replace("&quot;", "\"")
+    private fun cleanHtml(s: String): String {
+        if (s.isBlank()) return ""
+        // Jsoup parses the HTML and .text() strips all tags AND decodes every
+        // HTML entity (&rsquo; &mdash; &#8217; etc.) — far more robust than a
+        // hand-rolled regex+entity map, which left stray characters (e.g. on
+        // HuffPost feeds that embed full HTML in content:encoded).
+        return Jsoup.parse(s).text()
             .replace(MULTIPLE_SPACES, " ")
             .trim()
             .take(3000)
+    }
 
     /** Drop trailing "click to continue reading" / "read more" teaser stubs that
      *  some feeds (e.g. Guardian) append to the RSS content. */
@@ -107,7 +110,6 @@ class RssFetcher {
     }
 
     companion object {
-        private val HTML_TAGS = Regex("<[^>]*>")
         private val MULTIPLE_SPACES = Regex("\\s+")
     }
 }

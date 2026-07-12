@@ -51,15 +51,15 @@ import com.newsradar.app.ui.ReaderOverlay
 import com.newsradar.app.ui.ReaderMode
 
 /**
- * In-app live video streams via each outlet's official YouTube channel live page.
- * Using the `@handle/live` page (not the embed URL) avoids YouTube's embed
- * restriction (Error 153) that blocks third-party iframes from playing these
- * streams. Verified reachable (HTTP 200) for BBC / Sky / LBC.
+ * In-app live video via each outlet's official YouTube channel, played in the
+ * YouTube IFrame *embed* player (clean fullscreen, no site chrome). Using
+ * `embed/live_stream?channel=ID` resolves to that channel's current live broadcast
+ * and renders as a proper fullscreen player. Verified reachable (HTTP 200) for
+ * BBC / Sky / LBC.
  */
 private val VIDEO_SOURCES = listOf(
-    VideoSource("BBC News", "https://www.youtube.com/@BBCNews/live"),
-    VideoSource("Sky News", "https://www.youtube.com/@SkyNews/live"),
-    VideoSource("LBC", "https://www.youtube.com/@LBC/live")
+    VideoSource("BBC News", "https://www.youtube.com/embed/live_stream?channel=UC16niRr50-MSBwiO3YDb3RA&autoplay=1&mute=1"),
+    VideoSource("Sky News", "https://www.youtube.com/embed/live_stream?channel=UCky1dE_V6Vml3HAvFcPXMIw&autoplay=1&mute=1")
 )
 
 private data class VideoSource(val name: String, val url: String)
