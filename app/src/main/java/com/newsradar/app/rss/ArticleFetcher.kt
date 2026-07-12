@@ -42,7 +42,7 @@ object ArticleFetcher {
                 // Send consent-acceptance cookies so EU/UK GDPR walls serve the real
                 // article instead of a 302 to a consent interstitial (which would
                 // otherwise be scraped as boilerplate).
-                .header("Cookie", "CONSENT=YES+cb; cookieConsent=accepted; gdpr_consent=1")
+                .header("Cookie", "CONSENT=YES+cb; SOCS=CAESNQgDEIT; cookieConsent=accepted; gdpr_consent=1")
                 .followRedirects(true)
                 .timeout(30000)
                 .maxBodySize(0)
@@ -51,13 +51,18 @@ object ArticleFetcher {
             // Strip ad / promo / related / footer noise first.
             for (sel in JUNK_SELECTORS) doc.select(sel).remove()
 
-            // Prefer a real article container; fall back to <p> across the page.
+            // Prefer a real article container; fall back to <p> across the page, then
+            // to block-level text inside article containers (live blogs often render
+            // entries in <div>s rather than <p>), then to the meta description.
             val candidates = doc.select(
                 "article p, .article-body p, .story-body p, .article__body p, " +
-                    ".js-article-body p, main p, .content p, p"
+                    ".js-article-body p, main p, .content p, p, " +
+                    "article div, .article-body div, .story-body div, .js-article-body div, main div"
             )
-            val text = candidates.map { it.text().trim() }
-                // drop nav/boilerplate one-liners; allow longer paragraphs (up to 600)
+            val metaDesc = doc.select("meta[property=og:description], meta[name=description]")
+                .firstOrNull()?.attr("content")?.takeIf { it.isNotBlank() }
+            val text = (candidates.map { it.text().trim() } + listOfNotNull(metaDesc))
+                // drop nav/boilerplate one-liners; allow longer blocks (up to 600)
                 // so full sentences aren't discarded — keeps summaries a proper read.
                 .filter { it.length in 40..600 }
                 .filter { !it.contains("Cookie Policy", ignoreCase = true) }
@@ -92,8 +97,14 @@ object ArticleFetcher {
                 || text.contains("may use cookies", ignoreCase = true)
                 || text.contains("your consent", ignoreCase = true)
             if (text.isBlank() || isConsentWall) {
+                // Dump a snippet of what the device actually received so we can see
+                // whether it's a consent shell, a JS page, or a redirect stub.
+                val snippet = doc.body().text().take(200).replace("\n", " ")
                 com.newsradar.app.CrashLogger.record(
-                    RuntimeException("ArticleFetcher: consent wall / no body for $cleanLink (len=${text.length})")
+                    RuntimeException(
+                        "ArticleFetcher: no body for $cleanLink (len=${text.length}). " +
+                            "page-snippet=[$snippet]"
+                    )
                 )
                 null
             } else {

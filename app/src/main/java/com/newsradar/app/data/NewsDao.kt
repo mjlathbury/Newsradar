@@ -14,19 +14,24 @@ interface NewsDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertArticles(articles: List<Article>)
 
-    /** Feed sorted by learned relevance score, then recency. Excludes RED-rated. */
+    /** Feed sorted by learned relevance score, then recency. Excludes RED-rated
+     *  and any articles from disabled outlets (so turning a source off hides it
+     *  from the feed immediately, not just once the 7-day prune runs). */
     @Query(
         "SELECT * FROM articles WHERE rating != 'RED' " +
+        "AND outletId NOT IN (:disabledOutletIds) " +
         "ORDER BY score DESC, publishedAt DESC LIMIT :limit OFFSET :offset"
     )
-    suspend fun getFeedPage(limit: Int, offset: Int): List<Article>
+    suspend fun getFeedPage(limit: Int, offset: Int, disabledOutletIds: List<String> = emptyList()): List<Article>
 
-    /** Exploration pool: random un-RED articles (used to keep variety + training signal). */
+    /** Exploration pool: random un-RED articles (used to keep variety + training
+     *  signal), excluding disabled outlets. */
     @Query(
         "SELECT * FROM articles WHERE rating != 'RED' " +
+        "AND outletId NOT IN (:disabledOutletIds) " +
         "ORDER BY RANDOM() LIMIT :limit"
     )
-    suspend fun getFeedRandom(limit: Int): List<Article>
+    suspend fun getFeedRandom(limit: Int, disabledOutletIds: List<String> = emptyList()): List<Article>
 
     @Query("UPDATE articles SET rating = :rating WHERE id = :id")
     suspend fun setRating(id: String, rating: String)

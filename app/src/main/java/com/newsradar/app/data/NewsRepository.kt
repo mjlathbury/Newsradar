@@ -61,15 +61,17 @@ class NewsRepository private constructor(context: Context) {
         pageSize: Int = 5,
         excludeIds: Set<String> = emptySet()
     ): List<Article> {
+        // Outlets turned off in Settings are excluded from the feed immediately.
+        val disabled = dao.getOutletStates().filter { !it.enabled }.map { it.outletId }
         val guidedCount = (pageSize * (1 - EXPLORATION_RATIO)).toInt().coerceAtLeast(1)
         val exploreCount = (pageSize - guidedCount).coerceAtLeast(1)
 
         // Guided offset is based on guidedCount (we only pull guidedCount per page).
-        val guided = dao.getFeedPage(guidedCount, page * guidedCount)
+        val guided = dao.getFeedPage(guidedCount, page * guidedCount, disabled)
         val guidedIds = guided.map { it.id }.toSet()
 
         // Pull a larger random pool, then drop anything already shown so no duplicates.
-        val randomPool = dao.getFeedRandom(exploreCount * 4 + pageSize)
+        val randomPool = dao.getFeedRandom(exploreCount * 4 + pageSize, disabled)
             .filter { it.id !in excludeIds && it.id !in guidedIds }
         val explore = randomPool.take(exploreCount)
 
