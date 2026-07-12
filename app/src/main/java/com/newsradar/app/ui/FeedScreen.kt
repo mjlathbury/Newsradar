@@ -50,11 +50,16 @@ import com.newsradar.app.data.Rating
 import com.newsradar.app.ui.ReaderOverlay
 import com.newsradar.app.ui.ReaderMode
 
-/** In-app (WebView) live video streams — Brightcove-based UK outlets that play in-app. */
+/**
+ * In-app live video streams via each outlet's official YouTube 24/7 channel.
+ * Using `embed/live_stream?channel=ID` always resolves to that channel's current
+ * live broadcast and plays reliably inside our WebView window (landscape + mute
+ * toggle). Verified reachable (HTTP 200) for BBC / Sky / LBC.
+ */
 private val VIDEO_SOURCES = listOf(
-    VideoSource("BBC News", "https://www.bbc.co.uk/news/live/uk"),
-    VideoSource("Sky News", "https://news.sky.com/watch-live-tv"),
-    VideoSource("LBC", "https://www.lbc.co.uk")
+    VideoSource("BBC News", "https://www.youtube.com/embed/live_stream?channel=UC16niRr50-MSBwiO3YDb3RA"),
+    VideoSource("Sky News", "https://www.youtube.com/embed/live_stream?channel=UCky1dE_V6Vml3HAvFcPXMIw"),
+    VideoSource("LBC", "https://www.youtube.com/embed/live_stream?channel=UCB2ozH5SifrSM7WxLRradosw")
 )
 
 private data class VideoSource(val name: String, val url: String)

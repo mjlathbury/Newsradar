@@ -64,7 +64,7 @@ class RssFetcher {
             .replace("&quot;", "\"")
             .replace(MULTIPLE_SPACES, " ")
             .trim()
-            .take(400)
+            .take(1200)
 
     private fun parseDate(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null

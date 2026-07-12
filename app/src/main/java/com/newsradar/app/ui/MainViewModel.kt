@@ -81,11 +81,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         viewModelScope.launch {
             _summaries.value = _summaries.value + (article.id to SummaryState(loading = true))
-            // Use the cached body if present, else fetch it once.
-            val body = article.summaryText ?: ArticleFetcher.fetchText(article.link)
+            // Prefer the RSS blurb (article.summary) — it's already captured for every
+            // outlet, needs no network, and never 404s. Only fall back to a full-page
+            // fetch when the blurb is blank (some feeds omit it).
+            val body = article.summary.ifBlank { null } ?: ArticleFetcher.fetchText(article.link)
             val result = if (body != null) {
                 val summary = withContext(Dispatchers.Default) { Summarizer.summarize(body) }
-                repo.cacheSummaryText(article.id, body)
                 SummaryState(text = summary)
             } else {
                 SummaryState(error = true)

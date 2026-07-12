@@ -126,12 +126,12 @@ fun ReaderOverlay(
                     )
                     IconButton(
                         onClick = {
+                            // For YouTube embeds, muting requires reloading the iframe
+                            // with the mute query param — evaluateJavascript can't reach
+                            // the cross-origin player's <video>. Reload with flipped param.
                             muted = !muted
-                            // Flip the muted property on any <video> in the page.
-                            webViewRef.value?.evaluateJavascript(
-                                "document.querySelectorAll('video').forEach(function(v){v.muted=${if (muted) "true" else "false"};});",
-                                null
-                            )
+                            val sep = if (url.contains("?")) "&" else "?"
+                            webViewRef.value?.loadUrl("$url${sep}mute=${if (muted) 1 else 0}")
                         },
                         modifier = Modifier
                             .size(40.dp)
@@ -206,15 +206,6 @@ private fun WebReader(
                         }
                         override fun onPageFinished(view: WebView?, url: String?) {
                             loading = false
-                            // Enforce the initial mute state so the UI (flashing amber)
-                            // matches what actually plays. Without this a player that
-                            // defaults to sound-on would blast audio on autoplay.
-                            if (videoMode) {
-                                view?.evaluateJavascript(
-                                    "document.querySelectorAll('video').forEach(function(v){v.muted=${if (muted) "true" else "false"};});",
-                                    null
-                                )
-                            }
                         }
                         // Keep navigation inside the overlay (don't spawn external browser).
                         override fun shouldOverrideUrlLoading(
@@ -231,7 +222,11 @@ private fun WebReader(
                         mediaPlaybackRequiresUserGesture = !videoMode
                     }
                     try {
-                        loadUrl(url)
+                        // YouTube embeds: append autoplay + initial mute so the stream
+                        // starts playing silently (sound-on autoplay is blocked).
+                        val sep = if (url.contains("?")) "&" else "?"
+                        val finalUrl = if (videoMode) "$url${sep}autoplay=1&mute=1" else url
+                        loadUrl(finalUrl)
                     } catch (e: Exception) {
                         // A failed load must not crash the app — leave the spinner off.
                         loading = false
