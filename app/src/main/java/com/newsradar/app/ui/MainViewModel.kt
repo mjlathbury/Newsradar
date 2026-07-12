@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -95,12 +96,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         ) return
 
         viewModelScope.launch {
-            _summaries.value = _summaries.value + (article.id to SummaryState(loading = true))
+            _summaries.update { it + (article.id to SummaryState(loading = true)) }
             // Always prefer the full article body when we can fetch it — the RSS
             // blurb is only a short lede, which yields a too-brief summary for
             // outlets like the Guardian/Mirror. Fall back to the blurb only if the
             // fetch fails (never show "Couldn't build" when we have text).
             val blurb = article.summary
+            // fetchText is already main-safe (it switches to Dispatchers.IO
+            // internally) and catches its own network exceptions, returning null
+            // on failure — so no withContext/try-catch wrapper is needed here.
             val fetched = ArticleFetcher.fetchText(article.link)
             val body = when {
                 fetched != null && fetched.length > blurb.length -> fetched
@@ -118,7 +122,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val attempts = (existing?.failedAttempts ?: 0) + 1
                 SummaryState(error = true, failedAttempts = attempts)
             }
-            _summaries.value = _summaries.value + (article.id to result)
+            _summaries.update { it + (article.id to result) }
         }
     }
 

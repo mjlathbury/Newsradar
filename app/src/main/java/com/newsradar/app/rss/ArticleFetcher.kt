@@ -53,15 +53,27 @@ object ArticleFetcher {
 
             // Prefer a real article container; fall back to <p> across the page, then
             // to block-level text inside article containers (live blogs often render
-            // entries in <div>s rather than <p>), then to the meta description.
+            // entries in <div>s rather than <p>), then to JSON-LD articleBody (many
+            // JS-rendered sites embed the full text there), then to the meta desc.
             val candidates = doc.select(
                 "article p, .article-body p, .story-body p, .article__body p, " +
                     ".js-article-body p, main p, .content p, p, " +
                     "article div, .article-body div, .story-body div, .js-article-body div, main div"
             )
+            // JSON-LD blocks often hold the full article body on JS-rendered pages
+            // (Daily Mail / Mirror mobile shells return almost no <p> text).
+            val jsonLd = doc.select("script[type=application/ld+json]").mapNotNull { el ->
+                el.`data`().let { raw ->
+                    // Grab the articleBody / description string out of the JSON.
+                    Regex("\"articleBody\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(raw)
+                        ?.groupValues?.get(1)?.replace("\\n", " ")?.replace("\\\"", "\"")
+                        ?: Regex("\"description\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(raw)
+                            ?.groupValues?.get(1)?.replace("\\n", " ")?.replace("\\\"", "\"")
+                }
+            }
             val metaDesc = doc.select("meta[property=og:description], meta[name=description]")
                 .firstOrNull()?.attr("content")?.takeIf { it.isNotBlank() }
-            val text = (candidates.map { it.text().trim() } + listOfNotNull(metaDesc))
+            val text = (candidates.map { it.text().trim() } + jsonLd + listOfNotNull(metaDesc))
                 // drop nav/boilerplate one-liners; allow longer blocks (up to 600)
                 // so full sentences aren't discarded — keeps summaries a proper read.
                 .filter { it.length in 40..600 }

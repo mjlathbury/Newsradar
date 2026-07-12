@@ -62,7 +62,10 @@ class NewsRepository private constructor(context: Context) {
         excludeIds: Set<String> = emptySet()
     ): List<Article> {
         // Outlets turned off in Settings are excluded from the feed immediately.
+        // `ifEmpty { listOf("") }` avoids the invalid `NOT IN ()` SQL when nothing
+        // is disabled (an empty list would otherwise drop all rows).
         val disabled = dao.getOutletStates().filter { !it.enabled }.map { it.outletId }
+            .ifEmpty { listOf("") }
         val guidedCount = (pageSize * (1 - EXPLORATION_RATIO)).toInt().coerceAtLeast(1)
         val exploreCount = (pageSize - guidedCount).coerceAtLeast(1)
 
