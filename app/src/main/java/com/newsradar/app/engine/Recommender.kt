@@ -26,7 +26,8 @@ import kotlin.math.ln
  */
 class Recommender(private val dao: NewsDao) {
 
-    private val SEED_WEIGHT = 2.0 // equivalent to one GREEN rating per seed token
+    private val SEED_WEIGHT = 5.0 // equivalent to several GREEN ratings per seed token (dominates early)
+    private val DISLIKE_WEIGHT = 3.0 // negative weight: pushes disliked topics down, not out
 
     private fun delta(rating: Rating): Double = when (rating) {
         Rating.GREEN -> 1.5
@@ -36,8 +37,9 @@ class Recommender(private val dao: NewsDao) {
     }
 
     /**
-     * Seed initial interests. Existing learned weights are preserved; seeds only
-     * ADD positive weight (they never push a keyword negative). Re-scores after.
+     * Seed initial interests (likes). Each token gets a strong positive weight so
+     * matching stories rank near the top from day one. Seeds are merged with learned
+     * weights, so once the user rates enough, real feedback dominates.
      */
     suspend fun applySeeds(words: List<String>) {
         val tokens = words.flatMap { Tokeniser.tokenise(it) }.toSet().filter { it.isNotBlank() }
@@ -48,6 +50,27 @@ class Recommender(private val dao: NewsDao) {
             KeywordWeight(
                 keyword = t,
                 weight = maxOf(cur?.weight ?: 0.0, 0.0) + SEED_WEIGHT,
+                docCount = maxOf(cur?.docCount ?: 0, 1)
+            )
+        }
+        dao.upsertKeywords(updated)
+        rescoreAll()
+    }
+
+    /**
+     * Seed dislikes. Each token gets a negative weight so matching stories sink to
+     * the bottom of the feed — shown rarely (via the exploration pool) but never
+     * hard-hidden, so the model keeps a little training signal on them.
+     */
+    suspend fun applyDislikes(words: List<String>) {
+        val tokens = words.flatMap { Tokeniser.tokenise(it) }.toSet().filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return
+        val existing = dao.getKeywords(tokens).associateBy { it.keyword }
+        val updated = tokens.map { t ->
+            val cur = existing[t]
+            KeywordWeight(
+                keyword = t,
+                weight = minOf(cur?.weight ?: 0.0, 0.0) - DISLIKE_WEIGHT,
                 docCount = maxOf(cur?.docCount ?: 0, 1)
             )
         }

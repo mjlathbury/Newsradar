@@ -106,14 +106,14 @@ class NewsRepository private constructor(context: Context) {
         recommender.rescoreAll()
     }
 
-    /** Cache the fetched article body so a 60s summary survives re-opens. */
-    suspend fun cacheSummaryText(id: String, text: String) {
-        dao.setSummaryText(id, text)
-    }
-
-    /** Seed initial keyword interests into the recommender (bias the early feed). */
+    /** Seed initial keyword interests (likes) into the recommender. */
     suspend fun applySeeds(words: List<String>) {
         recommender.applySeeds(words)
+    }
+
+    /** Seed disliked keyword interests — down-weighted, shown rarely. */
+    suspend fun applyDislikes(words: List<String>) {
+        recommender.applyDislikes(words)
     }
 
     suspend fun reasonsFor(article: Article): List<String> =

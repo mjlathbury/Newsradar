@@ -51,7 +51,8 @@ class RssFetcher {
                     summary = run {
                         val desc = cleanHtml(item.description ?: "")
                         val content = cleanHtml(item.content ?: "")
-                        (if (content.length > desc.length) content else desc).take(3000)
+                        val full = if (content.length > desc.length) content else desc
+                        stripTeaser(full).take(3000)
                     },
                     link = link,
                     imageUrl = item.image ?: item.itunesItemData?.image,
@@ -71,7 +72,17 @@ class RssFetcher {
             .replace("&quot;", "\"")
             .replace(MULTIPLE_SPACES, " ")
             .trim()
-            .take(1200)
+            .take(3000)
+
+    /** Drop trailing "click to continue reading" / "read more" teaser stubs that
+     *  some feeds (e.g. Guardian) append to the RSS content. */
+    private fun stripTeaser(s: String): String {
+        val regex = Regex(
+            "(?i)\\s*(\\.\\.\\.|…)?\\s*(click (here to|to) (continue|read)|continue reading|read more|read the full (story|article))"
+        )
+        val match = regex.find(s)
+        return if (match != null) s.take(match.range.first).trim() else s
+    }
 
     private fun parseDate(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null

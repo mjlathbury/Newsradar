@@ -51,15 +51,15 @@ import com.newsradar.app.ui.ReaderOverlay
 import com.newsradar.app.ui.ReaderMode
 
 /**
- * In-app live video streams via each outlet's official YouTube 24/7 channel.
- * Using `embed/live_stream?channel=ID` always resolves to that channel's current
- * live broadcast and plays reliably inside our WebView window (landscape + mute
- * toggle). Verified reachable (HTTP 200) for BBC / Sky / LBC.
+ * In-app live video streams via each outlet's official YouTube channel live page.
+ * Using the `@handle/live` page (not the embed URL) avoids YouTube's embed
+ * restriction (Error 153) that blocks third-party iframes from playing these
+ * streams. Verified reachable (HTTP 200) for BBC / Sky / LBC.
  */
 private val VIDEO_SOURCES = listOf(
-    VideoSource("BBC News", "https://www.youtube.com/embed/live_stream?channel=UC16niRr50-MSBwiO3YDb3RA"),
-    VideoSource("Sky News", "https://www.youtube.com/embed/live_stream?channel=UCky1dE_V6Vml3HAvFcPXMIw"),
-    VideoSource("LBC", "https://www.youtube.com/embed/live_stream?channel=UCB2ozH5SifrSM7WxLRradosw")
+    VideoSource("BBC News", "https://www.youtube.com/@BBCNews/live"),
+    VideoSource("Sky News", "https://www.youtube.com/@SkyNews/live"),
+    VideoSource("LBC", "https://www.youtube.com/@LBC/live")
 )
 
 private data class VideoSource(val name: String, val url: String)
@@ -264,11 +264,9 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
                     outlet = readerOutlet,
                     mode = readerMode,
                     videoMode = readerVideo,
-                    summaryText = readerArticle?.let { summaries[it.id]?.text },
+                    summaryText = readerArticle?.let { summaries[it.id]?.text ?: it.summary },
                     summaryLoading = readerArticle?.let { summaries[it.id]?.loading == true } == true,
                     summaryError = readerArticle?.let { summaries[it.id]?.error == true } == true,
-                    onRequestSummary = { readerArticle?.let { vm.requestSummary(it) } },
-                    onSwitchToWeb = { readerMode = ReaderMode.WEB },
                     onClose = {
                         readerOpen = false
                         if (readerVideo) {

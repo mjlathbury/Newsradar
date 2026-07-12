@@ -37,8 +37,12 @@ object ArticleFetcher {
                 .replace("https://www.dailymail.co.uk/news/article-1490", "https://www.dailymail.co.uk/news")
 
             val doc = Jsoup.connect(cleanLink)
-                .userAgent("Mozilla/5.0 (Linux; Android) NewsRadar/1.0")
-                .timeout(15000)
+                .userAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-GB,en;q=0.9")
+                .followRedirects(true)
+                .timeout(30000)
+                .maxBodySize(0)
                 .get()
 
             // Strip ad / promo / related / footer noise first.
@@ -57,6 +61,8 @@ object ArticleFetcher {
                 .filter { !it.contains("Sign up to", ignoreCase = true) }
                 .filter { !it.contains("More from", ignoreCase = true) }
                 .filter { !it.contains("©", ignoreCase = true) }
+                .filter { !it.contains("continue reading", ignoreCase = true) }
+                .filter { !it.contains("click to continue", ignoreCase = true) }
                 .distinct()
                 .joinToString("\n\n")
             if (text.isBlank()) null else text.take(8000)

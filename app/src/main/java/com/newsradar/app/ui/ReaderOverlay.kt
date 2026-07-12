@@ -5,7 +5,6 @@ import android.view.ViewGroup
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -36,7 +35,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,16 +61,9 @@ enum class ReaderMode { WEB, SUMMARY }
  * @param outlet     source name shown in the top bar (uppercased).
  * @param mode       WEB shows the page in a WebView; SUMMARY shows the on-device
  *                   60s overview (passed in [summaryText]).
- * @param summaryText pre-fetched 60s summary text (null while loading / on error).
+ * @param summaryText pre-fetched summary text (null while loading / on error).
  * @param summaryLoading true while the summary is being generated.
  * @param summaryError true if summary generation failed.
- * @param videoMode  when true, the overlay is a video window: a mute toggle appears
- *                   next to the ✕ and the WebView autoplays muted (sound-on autoplay is
- *                   blocked by browser policy, so the user unmutes via the toggle).
- * @param onRequestSummary called when the user taps "Generate 60s summary". Omit
- *                   for non-article windows (e.g. video) — the summary UI is then hidden.
- * @param onSwitchToWeb called when the user wants to load the full WebView from
- *                   SUMMARY mode. Omit for non-article windows.
  * @param onClose     dismissed the overlay.
  */
 @Composable
@@ -85,8 +76,6 @@ fun ReaderOverlay(
     summaryText: String? = null,
     summaryLoading: Boolean = false,
     summaryError: Boolean = false,
-    onRequestSummary: () -> Unit = {},
-    onSwitchToWeb: () -> Unit = {},
     onClose: () -> Unit
 ) {
     // Mute state for video windows (starts muted so autoplay is allowed).
@@ -166,13 +155,11 @@ fun ReaderOverlay(
         // ---- Body (below the sticky bar) ----
         Box(Modifier.fillMaxSize().padding(top = 57.dp)) {
             when (mode) {
-                ReaderMode.WEB -> WebReader(url, videoMode, muted, webViewRef)
+                ReaderMode.WEB -> WebReader(url, videoMode, webViewRef)
                 ReaderMode.SUMMARY -> SummaryReader(
                     summaryText = summaryText,
                     loading = summaryLoading,
-                    error = summaryError,
-                    onRequest = onRequestSummary,
-                    onOpenFull = onSwitchToWeb
+                    error = summaryError
                 )
             }
         }
@@ -186,7 +173,6 @@ fun ReaderOverlay(
 private fun WebReader(
     url: String,
     videoMode: Boolean = false,
-    muted: Boolean = true,
     webViewRef: androidx.compose.runtime.MutableState<WebView?>? = null
 ) {
     var loading by remember { mutableStateOf(true) }
@@ -241,14 +227,12 @@ private fun WebReader(
     }
 }
 
-/** Scrollable 60s summary text with a link to open the full WebView. */
+/** Scrollable brief summary text. */
 @Composable
 private fun SummaryReader(
     summaryText: String?,
     loading: Boolean,
-    error: Boolean,
-    onRequest: () -> Unit,
-    onOpenFull: () -> Unit
+    error: Boolean
 ) {
     val scroll = rememberScrollState()
     Column(
@@ -273,7 +257,11 @@ private fun SummaryReader(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            else -> TextButton(onClick = onRequest) { Text("Generate brief summary") }
+            else -> Text(
+                "Summary unavailable for this article.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

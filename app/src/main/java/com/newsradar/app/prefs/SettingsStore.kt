@@ -32,6 +32,7 @@ class SettingsStore(private val context: Context) {
     private val SHOW_IMAGES = booleanPreferencesKey("show_images")
     private val RATING_DISPLAY = stringPreferencesKey("rating_display")
     private val SEED_INTERESTS = stringPreferencesKey("seed_interests")
+    private val DISLIKE_INTERESTS = stringPreferencesKey("dislike_interests")
     private val SHOW_DATE_BAR = booleanPreferencesKey("show_date_bar")
     private val SHOW_SUN = booleanPreferencesKey("show_sun")
 
@@ -62,6 +63,12 @@ class SettingsStore(private val context: Context) {
     val seedInterests: Flow<List<String>> =
         context.dataStore.data.map {
             it[SEED_INTERESTS].orEmpty()
+                .split(Regex("[,\\n]")).map { w -> w.trim() }.filter { it.isNotBlank() }
+        }
+    /** Disliked keyword interests — down-weighted, shown rarely but not hidden. */
+    val dislikeInterests: Flow<List<String>> =
+        context.dataStore.data.map {
+            it[DISLIKE_INTERESTS].orEmpty()
                 .split(Regex("[,\\n]")).map { w -> w.trim() }.filter { it.isNotBlank() }
         }
     /** Show a persistent date bar (Day, Date Month Year) at the top of the feed. */
@@ -100,6 +107,9 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setSeedInterests(words: List<String>) =
         context.dataStore.edit { it[SEED_INTERESTS] = words.joinToString(",") }
+
+    suspend fun setDislikeInterests(words: List<String>) =
+        context.dataStore.edit { it[DISLIKE_INTERESTS] = words.joinToString(",") }
 
     suspend fun setShowDateBar(enabled: Boolean) =
         context.dataStore.edit { it[SHOW_DATE_BAR] = enabled }

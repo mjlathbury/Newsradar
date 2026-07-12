@@ -123,6 +123,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         settings.ratingDisplay.stateIn(viewModelScope, SharingStarted.Eagerly, RatingDisplay.FULL)
     val seedInterests: StateFlow<List<String>> =
         settings.seedInterests.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val dislikeInterests: StateFlow<List<String>> =
+        settings.dislikeInterests.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val showDateBar: StateFlow<Boolean> =
         settings.showDateBar.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val showSun: StateFlow<Boolean> =
@@ -301,6 +303,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         repo.applySeeds(words)
         // Re-rank the visible feed immediately so the new interests take effect
         // without the user having to manually refresh.
+        val first = repo.getFeedPage(0)
+        _feed.value = FeedUiState(
+            articles = first,
+            reasons = buildReasons(first),
+            page = 0,
+            canLoadMore = first.size == 5
+        )
+    }
+    fun setDislikeInterests(words: List<String>) = viewModelScope.launch {
+        settings.setDislikeInterests(words)
+        repo.applyDislikes(words)
+        // Re-rank so disliked topics sink to the bottom (shown rarely via exploration).
         val first = repo.getFeedPage(0)
         _feed.value = FeedUiState(
             articles = first,

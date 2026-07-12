@@ -70,6 +70,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val showImages by vm.showImages.collectAsState()
     val ratingDisplay by vm.ratingDisplay.collectAsState()
     val seedInterests by vm.seedInterests.collectAsState()
+    val dislikeInterests by vm.dislikeInterests.collectAsState()
     val showDateBar by vm.showDateBar.collectAsState()
     val showSun by vm.showSun.collectAsState()
     val focusManager = LocalFocusManager.current
@@ -150,6 +151,35 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             Text(
                 "Seeds bias the early feed toward these topics until you've rated enough " +
                     "stories. Type a few words, then tap Done and refresh the feed.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "Topics you'd rather avoid",
+                style = MaterialTheme.typography.titleMedium
+            )
+            var dislikeText by remember(dislikeInterests) {
+                mutableStateOf(dislikeInterests.joinToString(", "))
+            }
+            OutlinedTextField(
+                value = dislikeText,
+                onValueChange = { dislikeText = it },
+                label = { Text("Topics to show rarely (comma separated)") },
+                placeholder = { Text("e.g. celebrity, reality tv, gossip") },
+                minLines = 2,
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    vm.setDislikeInterests(
+                        dislikeText.split(Regex("[,\\n]")).map { w -> w.trim() }
+                            .filter { w -> w.isNotBlank() })
+                    focusManager.clearFocus()
+                }),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "These topics are pushed to the bottom of the feed — shown rarely (via the " +
+                    "exploration mix) but never fully hidden, so the app keeps learning.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
