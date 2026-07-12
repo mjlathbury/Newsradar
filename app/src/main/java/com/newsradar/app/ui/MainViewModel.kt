@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -161,6 +162,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Last successful feed fetch time, used to throttle onResume auto-refresh. */
     private var lastFetchTime = 0L
 
+    /** Single-flight guard so rapid toggle taps don't fire concurrent syncs. */
+    private var refreshJob: Job? = null
+
     init {
         viewModelScope.launch { repo.ensureOutletStates() }
         viewModelScope.launch {
@@ -258,7 +262,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun refreshNow() {
-        viewModelScope.launch {
+        // Cancel any in-flight sync so rapid toggle taps coalesce into one fetch.
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             _feed.value = _feed.value.copy(refreshing = true, error = null)
             try {
                 repo.refresh()
@@ -308,15 +314,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setScheme(scheme: ColorScheme) = viewModelScope.launch { settings.setColorScheme(scheme) }
     fun setOutletEnabled(id: String, enabled: Boolean) = viewModelScope.launch {
         repo.setOutletEnabled(id, enabled)
-        // Re-query the feed immediately so enabling/disabling a source takes effect
-        // without the user having to manually refresh (mirrors setSeedInterests).
-        val first = repo.getFeedPage(0)
-        _feed.value = FeedUiState(
-            articles = first,
-            reasons = buildReasons(first),
-            page = 0,
-            canLoadMore = first.size == 5
-        )
+        // Re-fetch + re-query immediately so enabling a source pulls its articles
+        // right away (don't wait for a manual pull — otherwise a freshly-enabled
+        // outlet shows nothing until the user refreshes). Mirrors setSeedInterests.
+        refreshNow()
     }
 
     fun setUserName(name: String) {

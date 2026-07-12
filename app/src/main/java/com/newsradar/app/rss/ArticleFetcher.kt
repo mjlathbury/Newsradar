@@ -3,7 +3,10 @@ package com.newsradar.app.rss
 import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -178,18 +181,34 @@ object ArticleFetcher {
                         override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                             super.onPageFinished(view, loadedUrl)
                             // Some outlets (Daily Mail) inject the article body via
-                            // deferred JS *after* onPageFinished, so capturing
-                            // innerText immediately yields only the nav shell.
-                            // Wait a beat for the real content to render, then grab it.
-                            view?.postDelayed({
-                                view.evaluateJavascript("document.body.innerText") { result ->
-                                    val clean = result?.removeSurrounding("\"")
-                                        ?.replace("\\n", "\n")
-                                        ?.replace("\\u003C", "<")
-                                        ?.trim()
-                                    finish(clean)
+                            // deferred JS *after* onPageFinished, so a single immediate
+                            // read yields only the nav shell. Poll innerText until it
+                            // stabilises (slow networks need more than a fixed delay).
+                            val scope = CoroutineScope(cont.context)
+                            scope.launch {
+                                var lastLen = 0
+                                var best = ""
+                                var attempts = 0
+                                while (attempts < 6 && cont.isActive) {
+                                    delay(700)
+                                    val raw = suspendCancellableCoroutine<String> { c ->
+                                        view?.evaluateJavascript("document.body.innerText") { res ->
+                                            c.resume(res ?: "", onCancellation = {})
+                                        }
+                                    }
+                                    val clean = raw.removeSurrounding("\"").replace("\\n", "\n")
+                                        .replace("\\u003C", "<").trim()
+                                    if (clean.length > best.length) best = clean
+                                    // Content present and unchanged since last sample => stable.
+                                    if (clean.length > 500 && clean.length == lastLen) {
+                                        finish(clean)
+                                        return@launch
+                                    }
+                                    lastLen = clean.length
+                                    attempts++
                                 }
-                            }, 2500)
+                                finish(best)
+                            }
                         }
 
                         override fun onReceivedError(

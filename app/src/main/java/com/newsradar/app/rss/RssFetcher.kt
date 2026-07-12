@@ -5,6 +5,7 @@ import com.newsradar.app.data.Outlet
 import com.newsradar.app.data.Outlets
 import com.prof18.rssparser.RssParserBuilder
 import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -27,12 +28,18 @@ class RssFetcher {
         val jobs = outlets.map { outlet ->
             async(Dispatchers.IO) {
                 runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
-                    // Surface the real failure (Metro, etc.) so it shows in
-                    // Settings -> Debug instead of silently dropping the outlet.
+                    // prof18 can choke on tiny namespace/entity violations that a
+                    // server-side probe ignores. Log it and fail over to a direct
+                    // Jsoup RSS parse before giving up on the outlet entirely.
                     com.newsradar.app.CrashLogger.record(
-                        RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e)
+                        RuntimeException("RssFetcher: prof18 failed for '${outlet.id}', trying Jsoup fallback", e)
                     )
-                    emptyList()
+                    runCatching { fetchOutletFallback(outlet, now) }.getOrElse { e2 ->
+                        com.newsradar.app.CrashLogger.record(
+                            RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e2)
+                        )
+                        emptyList()
+                    }
                 }
             }
         }
@@ -67,6 +74,40 @@ class RssFetcher {
                     outletId = outlet.id,
                     outletName = outlet.name,
                     publishedAt = parseDate(item.pubDate) ?: now,
+                    fetchedAt = now
+                )
+            }
+        }
+
+    /**
+     * Fallback RSS parse using Jsoup directly (XML mode). Used when prof18 throws
+     * on an outlet's feed (e.g. Metro) — Jsoup is far more tolerant of minor
+     * namespace / entity quirks. Selects standard <item> fields including the
+     * namespaced <content:encoded>.
+     */
+    private suspend fun fetchOutletFallback(outlet: Outlet, now: Long): List<Article> =
+        withContext(Dispatchers.IO) {
+            val doc = Jsoup.connect(outlet.feedUrl)
+                .userAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+                .timeout(15000)
+                .parser(Parser.xmlParser())
+                .get()
+            doc.select("item").mapNotNull { el ->
+                val link = el.selectFirst("link")?.text()?.trim() ?: return@mapNotNull null
+                val title = el.selectFirst("title")?.text()?.trim().orEmpty()
+                if (title.isBlank()) return@mapNotNull null
+                val rawDesc = el.selectFirst("content|encoded")?.text()
+                    ?: el.selectFirst("description")?.text() ?: ""
+                Article(
+                    id = hash(link),
+                    title = title,
+                    summary = cleanHtml(rawDesc).take(3000),
+                    link = link,
+                    imageUrl = el.selectFirst("image|url")?.text()
+                        ?: el.selectFirst("enclosure")?.attr("url"),
+                    outletId = outlet.id,
+                    outletName = outlet.name,
+                    publishedAt = parseDate(el.selectFirst("pubDate")?.text()) ?: now,
                     fetchedAt = now
                 )
             }
