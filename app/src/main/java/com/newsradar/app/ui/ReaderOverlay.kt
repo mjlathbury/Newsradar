@@ -206,6 +206,15 @@ private fun WebReader(
                         }
                         override fun onPageFinished(view: WebView?, url: String?) {
                             loading = false
+                            // Enforce the initial mute state so the UI (flashing amber)
+                            // matches what actually plays. Without this a player that
+                            // defaults to sound-on would blast audio on autoplay.
+                            if (videoMode) {
+                                view?.evaluateJavascript(
+                                    "document.querySelectorAll('video').forEach(function(v){v.muted=${if (muted) "true" else "false"};});",
+                                    null
+                                )
+                            }
                         }
                         // Keep navigation inside the overlay (don't spawn external browser).
                         override fun shouldOverrideUrlLoading(

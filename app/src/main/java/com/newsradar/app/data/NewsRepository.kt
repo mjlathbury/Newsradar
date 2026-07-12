@@ -50,16 +50,28 @@ class NewsRepository private constructor(context: Context) {
      * the rest are random exploration stories interleaved through the page. This keeps
      * the recommender a *guide* rather than a filter — the user still sees varied,
      * un-rated stories so the model keeps learning their preferences.
+     *
+     * @param excludeIds articles already shown (across all pages) — the random
+     *        exploration pool skips these so the user never sees duplicates.
      */
     private val EXPLORATION_RATIO = 0.3 // share of each page that is random exploration
 
-    suspend fun getFeedPage(page: Int, pageSize: Int = 5): List<Article> {
+    suspend fun getFeedPage(
+        page: Int,
+        pageSize: Int = 5,
+        excludeIds: Set<String> = emptySet()
+    ): List<Article> {
         val guidedCount = (pageSize * (1 - EXPLORATION_RATIO)).toInt().coerceAtLeast(1)
         val exploreCount = (pageSize - guidedCount).coerceAtLeast(1)
 
-        val guided = dao.getFeedPage(guidedCount, page * pageSize)
+        // Guided offset is based on guidedCount (we only pull guidedCount per page).
+        val guided = dao.getFeedPage(guidedCount, page * guidedCount)
         val guidedIds = guided.map { it.id }.toSet()
-        val explore = dao.getFeedRandom(exploreCount).filter { it.id !in guidedIds }
+
+        // Pull a larger random pool, then drop anything already shown so no duplicates.
+        val randomPool = dao.getFeedRandom(exploreCount * 4 + pageSize)
+            .filter { it.id !in excludeIds && it.id !in guidedIds }
+        val explore = randomPool.take(exploreCount)
 
         // Interleave: one exploration story every `step` positions, so variety is
         // spread through the page instead of dumped at the end.
@@ -73,7 +85,20 @@ class NewsRepository private constructor(context: Context) {
             }
         }
         while (ei < explore.size) merged.add(explore[ei++])
-        return merged
+
+        // Guarantee exactly pageSize (don't signal EOF early): backfill with more
+        // guided stories if the random pool came up short.
+        var backfill = page * guidedCount + guided.size
+        while (merged.size < pageSize) {
+            val extra = dao.getFeedPage(1, backfill).firstOrNull() ?: break
+            if (extra.id in excludeIds || merged.any { it.id == extra.id }) {
+                backfill++
+                continue
+            }
+            merged.add(extra)
+            backfill++
+        }
+        return merged.take(pageSize)
     }
 
     suspend fun rate(article: Article, rating: Rating) {

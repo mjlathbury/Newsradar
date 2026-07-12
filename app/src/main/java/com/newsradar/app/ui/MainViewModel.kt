@@ -209,7 +209,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.loading || !s.canLoadMore) return
         viewModelScope.launch {
             val nextPage = s.page + 1
-            val more = repo.getFeedPage(nextPage)
+            val loaded = s.articles.map { it.id }.toSet()
+            val more = repo.getFeedPage(nextPage, excludeIds = loaded)
             _feed.value = s.copy(
                 articles = s.articles + more,
                 reasons = s.reasons + buildReasons(more),
