@@ -3,6 +3,8 @@ package com.newsradar.app.rss
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jsoup.Jsoup
+import org.json.JSONArray
+import org.json.JSONObject
 import java.net.URL
 
 /**
@@ -61,15 +63,13 @@ object ArticleFetcher {
                     "article div, .article-body div, .story-body div, .js-article-body div, main div"
             )
             // JSON-LD blocks often hold the full article body on JS-rendered pages
-            // (Daily Mail / Mirror mobile shells return almost no <p> text).
+            // (Daily Mail / Mirror mobile shells return almost no <p> text). Parse
+            // the JSON properly (not via regex) and search recursively for the
+            // articleBody / description field — it may be nested in @graph.
             val jsonLd = doc.select("script[type=application/ld+json]").mapNotNull { el ->
-                el.`data`().let { raw ->
-                    // Grab the articleBody / description string out of the JSON.
-                    Regex("\"articleBody\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(raw)
-                        ?.groupValues?.get(1)?.replace("\\n", " ")?.replace("\\\"", "\"")
-                        ?: Regex("\"description\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").find(raw)
-                            ?.groupValues?.get(1)?.replace("\\n", " ")?.replace("\\\"", "\"")
-                }
+                try {
+                    extractArticleText(el.`data`())
+                } catch (_: Exception) { null }
             }
             val metaDesc = doc.select("meta[property=og:description], meta[name=description]")
                 .firstOrNull()?.attr("content")?.takeIf { it.isNotBlank() }
@@ -139,5 +139,33 @@ object ArticleFetcher {
             )
             null
         }
+    }
+
+    /**
+     * Pull the article text out of a JSON-LD block. Searches recursively for
+     * `articleBody` (preferred) or `description`, since the field may be nested
+     * inside an `@graph` array rather than at the top level.
+     */
+    private fun extractArticleText(json: String): String? {
+        fun search(node: Any?): String? {
+            return when (node) {
+                is JSONObject -> {
+                    node.optString("articleBody", "").takeIf { it.isNotBlank() }
+                        ?: node.optString("description", "").takeIf { it.isNotBlank() }
+                        ?: node.optString("article", "").takeIf { it.isNotBlank() }
+                        ?: node.optJSONArray("@graph")?.let { g ->
+                            (0 until g.length()).firstNotNullOfOrNull { search(g.opt(it)) }
+                        }
+                        ?: node.keys().asSequence().firstNotNullOfOrNull { search(node.opt(it)) }
+                }
+                is JSONArray -> {
+                    (0 until node.length()).firstNotNullOfOrNull { search(node.opt(it)) }
+                }
+                else -> null
+            }
+        }
+        val root = JSONObject(json)
+        return search(root)?.replace("\\n", " ")?.replace("\\t", " ")?.trim()
+            ?.takeIf { it.length >= 40 }
     }
 }

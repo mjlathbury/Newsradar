@@ -296,8 +296,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Settings actions ----
     fun setTheme(mode: ThemeMode) = viewModelScope.launch { settings.setThemeMode(mode) }
     fun setScheme(scheme: ColorScheme) = viewModelScope.launch { settings.setColorScheme(scheme) }
-    fun setOutletEnabled(id: String, enabled: Boolean) =
-        viewModelScope.launch { repo.setOutletEnabled(id, enabled) }
+    fun setOutletEnabled(id: String, enabled: Boolean) = viewModelScope.launch {
+        repo.setOutletEnabled(id, enabled)
+        // Re-query the feed immediately so enabling/disabling a source takes effect
+        // without the user having to manually refresh (mirrors setSeedInterests).
+        val first = repo.getFeedPage(0)
+        _feed.value = FeedUiState(
+            articles = first,
+            reasons = buildReasons(first),
+            page = 0,
+            canLoadMore = first.size == 5
+        )
+    }
 
     fun setUserName(name: String) {
         _userName.value = name
