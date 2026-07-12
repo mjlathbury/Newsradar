@@ -26,7 +26,14 @@ class RssFetcher {
 
         val jobs = outlets.map { outlet ->
             async(Dispatchers.IO) {
-                runCatching { fetchOutlet(outlet, now) }.getOrElse { emptyList() }
+                runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
+                    // Surface the real failure (Metro, etc.) so it shows in
+                    // Settings -> Debug instead of silently dropping the outlet.
+                    com.newsradar.app.CrashLogger.record(
+                        RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e)
+                    )
+                    emptyList()
+                }
             }
         }
         val all = jobs.awaitAll().flatten()
