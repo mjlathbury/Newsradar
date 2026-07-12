@@ -68,8 +68,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     data class SummaryState(
         val loading: Boolean = false,
         val text: String? = null,
-        val error: Boolean = false
+        val error: Boolean = false,
+        /** True only when [text] came from a successful full-article fetch (not the
+         *  RSS blurb fallback). A blurb fallback is never cached-sticky — it must
+         *  keep retrying so a transient fetch failure doesn't stick a short blurb. */
+        val fetched: Boolean = false,
+        /** Consecutive failed fetches for this article. Capped so a permanently
+         *  dead link (e.g. a 410 tracking URL) doesn't spam fetchText on every open. */
+        val failedAttempts: Int = 0
     )
+
+    /** Max fetch retries per article per session before we stop trying. */
+    private val MAX_SUMMARY_RETRIES = 3
 
     private val _summaries = MutableStateFlow<Map<String, SummaryState>>(emptyMap())
     val summaries: StateFlow<Map<String, SummaryState>> = _summaries.asStateFlow()
@@ -77,7 +87,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Fetch + summarize an article's body on demand (only when the user asks). */
     fun requestSummary(article: Article) {
         val existing = _summaries.value[article.id]
-        if (existing?.loading == true || existing?.text != null) return // already done/running
+        // Skip if loading, or we already have a *fetched* summary, or we've already
+        // retried enough times on a dead link (avoid spamming fetchText forever).
+        if (existing?.loading == true ||
+            (existing?.text != null && existing.fetched) ||
+            existing?.failedAttempts ?: 0 >= MAX_SUMMARY_RETRIES
+        ) return
 
         viewModelScope.launch {
             _summaries.value = _summaries.value + (article.id to SummaryState(loading = true))
@@ -94,9 +109,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val result = if (body != null && body.isNotBlank()) {
                 val summary = withContext(Dispatchers.Default) { Summarizer.summarize(body) }
-                SummaryState(text = summary)
+                // Mark as fetched ONLY when the text actually came from the article
+                // body (not the blurb fallback), so failures keep retrying.
+                SummaryState(text = summary, fetched = fetched != null && fetched.length > blurb.length)
             } else {
-                SummaryState(error = true)
+                // Fetch failed (or both empty): remember the attempt so a permanently
+                // dead link stops retrying after MAX_SUMMARY_RETRIES.
+                val attempts = (existing?.failedAttempts ?: 0) + 1
+                SummaryState(error = true, failedAttempts = attempts)
             }
             _summaries.value = _summaries.value + (article.id to result)
         }

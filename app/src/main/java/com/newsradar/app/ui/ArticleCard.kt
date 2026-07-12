@@ -48,16 +48,22 @@ import com.newsradar.app.ui.theme.RatingAmber
 import com.newsradar.app.ui.theme.RatingGreen
 import com.newsradar.app.ui.theme.RatingRed
 
-/** Story age → colour + human label. Green <4h, amber 4–8h, red 8h+. */
+/** Story age → colour + human label. Green <4h, amber 4–8h, red 8h+.
+ *  A missing/bad pubDate defaults to "now" at fetch time, so if publishedAt is
+ *  effectively the fetch moment we treat the age as unknown (red, "age?"). */
 private fun ageInfo(publishedAt: Long): Pair<Color, String> {
-    val hours = (System.currentTimeMillis() - publishedAt) / 3_600_000L
+    val ageMs = System.currentTimeMillis() - publishedAt
+    val hours = ageMs / 3_600_000L
+    // publishedAt within 30s of now ⇒ the date couldn't be parsed (fell back to
+    // fetch time), so we don't know the real age — show it as old/unknown.
+    if (ageMs < 30_000L) return RatingRed to "age?"
     val color = when {
         hours < 4 -> RatingGreen
         hours < 8 -> RatingAmber
         else -> RatingRed
     }
     val label = when {
-        hours < 1 -> "${maxOf(1, ((System.currentTimeMillis() - publishedAt) / 60_000L).toInt())}m ago"
+        hours < 1 -> "${maxOf(1, (ageMs / 60_000L).toInt())}m ago"
         hours < 24 -> "${hours}h ago"
         else -> "${hours / 24}d ago"
     }
