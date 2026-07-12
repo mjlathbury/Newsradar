@@ -28,6 +28,12 @@ class RssFetcher {
         val jobs = outlets.map { outlet ->
             async(Dispatchers.IO) {
                 runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
+                    // A CancellationException just means this sync was superseded by
+                    // another (e.g. init + onResume both kicked off a refresh) — it is
+                    // NOT a real feed failure, so don't log it as one (it would show up
+                    // as a spurious "feed fetch failed" in Debug while the surviving
+                    // sync still delivers the articles). Only log genuine errors.
+                    if (e is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
                     // prof18 can choke on tiny namespace/entity violations that a
                     // server-side probe ignores. Log it and fail over to a direct
                     // Jsoup RSS parse before giving up on the outlet entirely.
@@ -35,6 +41,8 @@ class RssFetcher {
                         RuntimeException("RssFetcher: prof18 failed for '${outlet.id}', trying Jsoup fallback", e)
                     )
                     runCatching { fetchOutletFallback(outlet, now) }.getOrElse { e2 ->
+                        // Similarly, a cancellation while trying the fallback is benign.
+                        if (e2 is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
                         com.newsradar.app.CrashLogger.record(
                             RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e2)
                         )

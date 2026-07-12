@@ -52,26 +52,27 @@ object ArticleFetcher {
         "figure figcaption", ".caption", ".credit"
     )
 
-    // Per-site container selectors tried first (fast, precise). Mirror has no stable
-    // class so we use the semantic <article> tag; Daily Mail uses .article-text (and
-    // [itemprop=articleBody] as a fallback). Then generic fallbacks for other outlets.
+    // Per-site container selectors tried first (fast, precise), then generic
+    // fallbacks. Verified 2026-07-12 by an on-device-style headless-browser probe:
+    //   - Daily Mail: body lives in div.article-text (-> [itemprop=articleBody]).
+    //     There is NO <article> element on DM, so do NOT use it.
+    //   - Mirror: body lives in the React class [class*=ArticleBody]
+    //     ([class*=article-body] also matches); the bare <article> wrapper is too
+    //     broad and pulls nav/ads, so it's a low-priority fallback only.
+    //   - Consent cookies / AMP are INERT for both (proven empirically) — selectors
+    //     are the whole fix, on a server-rendered page.
     private val CONTAINER_SELECTORS = arrayOf(
-        "article",                       // Mirror (live blog + standard)
-        ".article-text",                 // Daily Mail
+        ".article-text",                 // Daily Mail (primary)
         "[itemprop=articleBody]",        // Daily Mail fallback
+        "[class*=ArticleBody]",          // Mirror (React class) — primary
+        "[class*=article-body]",         // Mirror generic
         ".article-body", ".story-body", ".article__body", ".js-article-body",
-        "main", ".content", ".post-content", ".entry-content"
+        "main", ".content", ".post-content", ".entry-content",
+        "article"                        // last resort (too broad on DM/Mirror)
     )
 
-    // Consent-acceptance cookies so EU/UK GDPR/CCPA walls serve the real article
-    // instead of a gated interstitial. DM needs GDPR-style keys; Mirror needs Reach
-    // CMP acceptance. Sending all is harmless.
-    private const val CONSENT_COOKIE =
-        "CONSENT=YES+cb; SOCS=CAESNQgDEIT; cookieConsent=accepted; gdpr_consent=1; " +
-            "GDPR=1; euConsent=1; cmpskip=1; " +
-            "EdgePackConsent=1; pugt=1; usprivacy=1YNN"
-
-    // Real mobile UA — Daily Mail's Akamai edge returns HTTP 403 to missing/bot UAs.
+    // Real mobile UA — Daily Mail's Akamai edge returns HTTP 403 to missing/bot UAs,
+    // so a real browser-like mobile UA is required to get past it on the HTTP path.
     private const val MOBILE_UA =
         "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
@@ -85,7 +86,7 @@ object ArticleFetcher {
                     .userAgent(MOBILE_UA)
                     .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                     .header("Accept-Language", "en-GB,en;q=0.9")
-                    .header("Cookie", CONSENT_COOKIE)
+                    .header("Upgrade-Insecure-Requests", "1")
                     .followRedirects(true)
                     .timeout(30000)
                     .maxBodySize(0)
@@ -113,10 +114,13 @@ object ArticleFetcher {
             }
         }
 
-    /** Normalise a feed link: strip tracking query params, keep .co.uk host. */
+    /** Normalise a feed link: strip tracking query params
+     *  geo-gated .co.uk host to the global .com (the .co.uk 301-redirects to .com
+     *  anyway, and .com is the host that serves the full body on-device; .co.uk is
+     *  the one that returns the bodyless/403 variant). */
     private fun normaliseLink(link: String): String =
         link.substringBefore("?")
-            .replace("dailymail.com", "dailymail.co.uk")
+            .replace("dailymail.co.uk", "dailymail.com")
 
     /**
      * Extract readable article text from an already-fetched [Document], trying
@@ -171,19 +175,24 @@ object ArticleFetcher {
     }
 
     /**
-     * Last-resort fetch: render the page in a headless WebView and read the best
-     * container's innerText (NOT body.innerText, which returns nav+footer). Needed
-     * only for genuinely JS-rendered pages. Runs on Dispatchers.Main.
+     * On-device last-resort fetch via a headless WebView, used only when the Jsoup
+     * HTTP path yields too little (e.g. a genuinely JS-rendered page). For Daily Mail
+     * / Mirror the HTTP path with per-site selectors is the real fix — this is just a
+     * safety net. Loads the (already .com-normalised) URL, polls the best article
+     * container's innerText until stable, and runs Readability4J on the rendered DOM.
+     * Consent cookies / AMP were tested empirically and are INERT for these sites, so
+     * we don't bother with them here.
      */
     private suspend fun webViewFallback(url: String, context: Context?): String? {
         if (context == null) return null
-        return withTimeoutOrNull(14_000) {
+        return withTimeoutOrNull(18_000) {
             withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<String?> { cont ->
                     val webView = WebView(context).apply {
                         settings.javaScriptEnabled = true
                         settings.blockNetworkImage = true
                         settings.domStorageEnabled = true
+                        settings.userAgentString = MOBILE_UA
                     }
                     var done = false
                     fun finish(text: String?) {
@@ -196,15 +205,13 @@ object ArticleFetcher {
                     webView.webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                             super.onPageFinished(view, loadedUrl)
-                            // Poll the BEST CONTAINER's innerText (not body), tracking
-                            // the longest stable sample — never the nav shell.
                             val scope = CoroutineScope(cont.context)
                             scope.launch {
                                 var lastLen = 0
                                 var best = ""
                                 var attempts = 0
-                                while (attempts < 8 && cont.isActive) {
-                                    delay(500)
+                                while (attempts < 10 && cont.isActive) {
+                                    delay(600)
                                     val raw = suspendCancellableCoroutine<String> { c ->
                                         view?.evaluateJavascript(EXTRACT_JS) { res ->
                                             c.resume(res ?: "", onCancellation = {})
@@ -218,8 +225,7 @@ object ArticleFetcher {
                                     } else {
                                         lastLen++
                                     }
-                                    // Stable (unchanged) for 3 rounds and non-trivial.
-                                    if (lastLen >= 3 && best.length > 200) {
+                                    if (lastLen >= 3 && best.length > 400) {
                                         finish(best)
                                         return@launch
                                     }
@@ -243,13 +249,14 @@ object ArticleFetcher {
         }?.takeIf { it.length >= 40 }
     }
 
-    // JS that returns the longest article container's innerText (Mirror <article>,
-    // Daily Mail .article-text / [itemprop=articleBody]), else the longest block
-    // among the generic selectors. Falls back to body only if nothing else exists.
+    // JS that returns the longest article container's innerText using the same
+    // per-site selectors as the Jsoup path (Daily Mail .article-text, Mirror
+    // [class*=ArticleBody]), then generic fallbacks, then body only if nothing else.
     private const val EXTRACT_JS = """
         (function() {
-          var sels = ['article','.article-text','[itemprop="articleBody"]',
-                      '.article-body','.story-body','.js-article-body','main','.content'];
+          var sels = ['.article-text','[itemprop="articleBody"]','[class*="ArticleBody"]',
+                      '[class*="article-body"]','.article-body','.story-body','.js-article-body',
+                      'main','.content','article'];
           var best = '';
           for (var i = 0; i < sels.length; i++) {
             var els = document.querySelectorAll(sels[i]);
@@ -258,7 +265,7 @@ object ArticleFetcher {
               if (t.length > best.length) best = t;
             }
           }
-          if (!best) best = (document.body.innerText || '').trim();
+          if (!best || best.length < 200) best = (document.body.innerText || '').trim();
           return best;
         })();
     """

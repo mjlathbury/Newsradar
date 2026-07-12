@@ -164,6 +164,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Single-flight guard so rapid toggle taps don't fire concurrent syncs. */
     private var refreshJob: Job? = null
+    /** Skip the first onResume auto-refresh: init() already kicks off a sync, and
+     *  letting onResume fire a second one just cancels the first (spurious
+     *  JobCancellationException logged as a fake "feed fetch failed"). */
+    private var firstResume = true
 
     init {
         viewModelScope.launch { repo.ensureOutletStates() }
@@ -287,8 +291,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Called from MainActivity.onResume: only re-pull if the feed is stale
-     *  (>15 min old) so we don't hammer RSS endpoints on every resume. */
+     *  (>15 min old) so we don't hammer RSS endpoints on every resume. The first
+     *  onResume right after init() is skipped — init already started a sync, and
+     *  firing a second one would cancel the first (noise + fake failure logs). */
     fun refreshIfStale() {
+        if (firstResume) { firstResume = false; return }
         if (System.currentTimeMillis() - lastFetchTime > 15 * 60 * 1000) refreshNow()
     }
 
