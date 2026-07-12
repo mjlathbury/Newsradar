@@ -39,6 +39,10 @@ object ArticleFetcher {
                 .userAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-GB,en;q=0.9")
+                // Send consent-acceptance cookies so EU/UK GDPR walls serve the real
+                // article instead of a 302 to a consent interstitial (which would
+                // otherwise be scraped as boilerplate).
+                .header("Cookie", "CONSENT=YES+cb; cookieConsent=accepted; gdpr_consent=1")
                 .followRedirects(true)
                 .timeout(30000)
                 .maxBodySize(0)
@@ -62,9 +66,22 @@ object ArticleFetcher {
                 .filter { !it.contains("©", ignoreCase = true) }
                 .filter { !it.contains("continue reading", ignoreCase = true) }
                 .filter { !it.contains("click to continue", ignoreCase = true) }
+                // Consent / cookie walls (Google JCP, "Exco Player", etc.) — these are
+                // scraped when the page 302s to a GDPR interstitial instead of the
+                // article. Drop them so they never end up in the summary.
+                .filter { !it.contains("cookie", ignoreCase = true) }
+                .filter { !it.contains("consent", ignoreCase = true) }
+                .filter { !it.contains("privacy policy", ignoreCase = true) }
+                .filter { !it.contains("Allow and Continue", ignoreCase = true) }
+                .filter { !it.contains("Custom Search", ignoreCase = true) }
+                .filter { !it.contains("provided by", ignoreCase = true) }
                 .distinct()
                 .joinToString("\n\n")
-            if (text.isBlank()) null else text.take(8000)
+            // If what we got back is essentially just a consent wall (no real article
+            // body), treat the fetch as failed so we fall back to the RSS blurb.
+            if (text.isBlank() || text.contains("we need your consent", ignoreCase = true)
+                || text.contains("may use cookies", ignoreCase = true)
+            ) null else text.take(8000)
         } catch (e: Exception) {
             // Surface the real failure (e.g. 410 on Daily Mail tracking links, SSL,
             // timeout) so it can be diagnosed from Settings → Debug instead of failing

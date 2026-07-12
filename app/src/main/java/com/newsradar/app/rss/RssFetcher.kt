@@ -72,6 +72,20 @@ class RssFetcher {
         // hand-rolled regex+entity map, which left stray characters (e.g. on
         // HuffPost feeds that embed full HTML in content:encoded).
         return Jsoup.parse(s).text()
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            // Drop consent / cookie-wall boilerplate that some feeds embed in
+            // content:encoded (e.g. Evening Standard via Google JCP / Exco Player).
+            .filter { !it.contains("cookie", ignoreCase = true) }
+            .filter { !it.contains("consent", ignoreCase = true) }
+            .filter { !it.contains("privacy policy", ignoreCase = true) }
+            .filter { !it.contains("Allow and Continue", ignoreCase = true) }
+            .filter { !it.contains("Custom Search", ignoreCase = true) }
+            .filter { !it.contains("provided by", ignoreCase = true) }
+            .filter { !it.contains("we need your consent", ignoreCase = true) }
+            .filter { !it.contains("may use cookies", ignoreCase = true) }
+            .joinToString(" ")
             .replace(MULTIPLE_SPACES, " ")
             .trim()
             .take(3000)
