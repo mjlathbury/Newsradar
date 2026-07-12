@@ -158,7 +158,7 @@ object ArticleFetcher {
      */
     private suspend fun webViewFallback(url: String, context: Context?): String? {
         if (context == null) return null
-        return withTimeoutOrNull(10_000) {
+        return withTimeoutOrNull(14_000) {
             withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<String?> { cont ->
                     val webView = WebView(context).apply {
@@ -166,18 +166,30 @@ object ArticleFetcher {
                         settings.blockNetworkImage = true
                         settings.domStorageEnabled = true
                     }
+                    var done = false
+                    fun finish(text: String?) {
+                        if (done) return
+                        done = true
+                        if (cont.isActive) cont.resume(text, onCancellation = {})
+                        webView.destroy()
+                    }
                     cont.invokeOnCancellation { webView.destroy() }
                     webView.webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                             super.onPageFinished(view, loadedUrl)
-                            view?.evaluateJavascript("document.body.innerText") { result ->
-                                val clean = result?.removeSurrounding("\"")
-                                    ?.replace("\\n", "\n")
-                                    ?.replace("\\u003C", "<")
-                                    ?.trim()
-                                if (cont.isActive) cont.resume(clean, onCancellation = {})
-                                view?.destroy()
-                            }
+                            // Some outlets (Daily Mail) inject the article body via
+                            // deferred JS *after* onPageFinished, so capturing
+                            // innerText immediately yields only the nav shell.
+                            // Wait a beat for the real content to render, then grab it.
+                            view?.postDelayed({
+                                view.evaluateJavascript("document.body.innerText") { result ->
+                                    val clean = result?.removeSurrounding("\"")
+                                        ?.replace("\\n", "\n")
+                                        ?.replace("\\u003C", "<")
+                                        ?.trim()
+                                    finish(clean)
+                                }
+                            }, 2500)
                         }
 
                         override fun onReceivedError(
@@ -185,8 +197,7 @@ object ArticleFetcher {
                             request: android.webkit.WebResourceRequest?,
                             error: android.webkit.WebResourceError?
                         ) {
-                            if (cont.isActive) cont.resume(null, onCancellation = {})
-                            view?.destroy()
+                            finish(null)
                         }
                     }
                     webView.loadUrl(url)
@@ -220,7 +231,13 @@ object ArticleFetcher {
                 else -> null
             }
         }
-        val root = JSONObject(json)
+        // The script body may be a top-level object OR a JSONArray (e.g. a bare
+        // @graph list). Handle both so we don't discard a valid block.
+        val root = try {
+            JSONObject(json)
+        } catch (_: Exception) {
+            try { JSONArray(json) } catch (_: Exception) { return null }
+        }
         return search(root)?.replace("\\n", " ")?.replace("\\t", " ")?.trim()
             ?.takeIf { it.length >= 40 }
     }
