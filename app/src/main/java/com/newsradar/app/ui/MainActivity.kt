@@ -20,11 +20,14 @@ import com.newsradar.app.ui.theme.NewsRadarTheme
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var vm: MainViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
-            val vm: MainViewModel = viewModel()
+            val viewModel: MainViewModel = viewModel()
+            vm = viewModel
             val theme by vm.themeMode.collectAsState()
             val scheme by vm.colorScheme.collectAsState()
 
@@ -54,5 +57,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // Re-pull the feed when returning to the foreground, but only if it's stale
+    // (>15 min) so we don't hammer RSS endpoints on every resume (e.g. closing
+    // the notification shade). Timestamps/age-colours stay current without abuse.
+    override fun onResume() {
+        super.onResume()
+        if (::vm.isInitialized) vm.refreshIfStale()
     }
 }

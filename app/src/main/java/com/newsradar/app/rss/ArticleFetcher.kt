@@ -1,7 +1,12 @@
 package com.newsradar.app.rss
 
+import android.content.Context
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import kotlin.coroutines.suspendCoroutine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jsoup.Jsoup
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,8 +33,11 @@ object ArticleFetcher {
         "figure figcaption", ".caption", ".credit"
     )
 
-    /** Returns the main article text, or null if it can't be read. */
-    suspend fun fetchText(link: String): String? = withContext(Dispatchers.IO) {
+    /** Returns the main article text, or null if it can't be read.
+     *  @param context needed only as a last-resort fallback: if Jsoup + JSON-LD
+     *  yield too little text (JS-rendered shells like Daily Mail / Mirror), we
+     *  render the page in a headless WebView and read document.body.innerText. */
+    suspend fun fetchText(link: String, context: Context? = null): String? = withContext(Dispatchers.IO) {
         // Clean the link first: Daily Mail RSS serves tracking-wrapped URLs that
         // 410 (Gone). Strip query params and normalise to the .co.uk article host.
         val cleanLink = link
@@ -118,16 +126,16 @@ object ArticleFetcher {
                             "page-snippet=[$snippet]"
                     )
                 )
-                null
+                // Last resort: render in a headless WebView (handles JS shells).
+                webViewFallback(cleanLink, context)
+            } else if (text.length < 300) {
+                // Too short to be the real article (a stub / nav shell). Try the
+                // WebView before falling back to the RSS blurb.
+                com.newsradar.app.CrashLogger.record(
+                    RuntimeException("ArticleFetcher: suspiciously short body for $cleanLink (len=${text.length})")
+                )
+                webViewFallback(cleanLink, context) ?: text.take(8000)
             } else {
-                // Anything shorter than ~300 chars means we scraped the wrong thing
-                // (a stub, a nav shell, etc.) rather than the article — log it so the
-                // failure is visible in Settings → Debug instead of looking "fine".
-                if (text.length < 300) {
-                    com.newsradar.app.CrashLogger.record(
-                        RuntimeException("ArticleFetcher: suspiciously short body for $cleanLink (len=${text.length})")
-                    )
-                }
                 text.take(8000)
             }
         } catch (e: Exception) {
@@ -142,11 +150,59 @@ object ArticleFetcher {
     }
 
     /**
+     * Last-resort fetch: render the page in a headless WebView and read
+     * document.body.innerText. Needed for JS-rendered shells (Daily Mail / Mirror)
+     * where Jsoup + JSON-LD return almost nothing. WebView must run on the Main
+     * thread, so we hop dispatchers and wrap it in a cancellable, timeout-guarded
+     * coroutine. Returns cleaned text, or null on any failure/timeout.
+     */
+    private suspend fun webViewFallback(url: String, context: Context?): String? {
+        if (context == null) return null
+        return withTimeoutOrNull(10_000) {
+            withContext(Dispatchers.Main) {
+                suspendCoroutine<String?> { cont ->
+                    val cancellable = cont as kotlinx.coroutines.CancellableContinuation<String?>
+                    val webView = WebView(context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.blockNetworkImage = true
+                        settings.domStorageEnabled = true
+                    }
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, loadedUrl: String?) {
+                            super.onPageFinished(view, loadedUrl)
+                            view?.evaluateJavascript("document.body.innerText") { result ->
+                                val clean = result?.removeSurrounding("\"")
+                                    ?.replace("\\n", "\n")
+                                    ?.replace("\\u003C", "<")
+                                    ?.trim()
+                                if (cancellable.isActive) cancellable.resume(clean, onCancellation = {})
+                                view?.destroy()
+                            }
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                            error: android.webkit.WebResourceError?
+                        ) {
+                            if (cancellable.isActive) cancellable.resume(null, onCancellation = {})
+                            view?.destroy()
+                        }
+                    }
+                    webView.loadUrl(url)
+                }
+            }
+        }?.takeIf { it.length >= 40 }
+    }
+
+    /**
      * Pull the article text out of a JSON-LD block. Searches recursively for
      * `articleBody` (preferred) or `description`, since the field may be nested
-     * inside an `@graph` array rather than at the top level.
+     * inside an `@graph` array rather than at the top level. A depth cap prevents
+     * StackOverflow from self-referential ad-tech JSON.
      */
-    private fun extractArticleText(json: String): String? {
+    private fun extractArticleText(json: String, depth: Int = 0): String? {
+        if (depth > 12) return null
         fun search(node: Any?): String? {
             return when (node) {
                 is JSONObject -> {

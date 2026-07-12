@@ -105,7 +105,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // fetchText is already main-safe (it switches to Dispatchers.IO
             // internally) and catches its own network exceptions, returning null
             // on failure — so no withContext/try-catch wrapper is needed here.
-            val fetched = ArticleFetcher.fetchText(article.link)
+            val fetched = ArticleFetcher.fetchText(article.link, getApplication())
             val body = when {
                 fetched != null && fetched.length > blurb.length -> fetched
                 blurb.isNotBlank() -> blurb
@@ -157,6 +157,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val outletStates = repo.observeOutletStates()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Last successful feed fetch time, used to throttle onResume auto-refresh. */
+    private var lastFetchTime = 0L
 
     init {
         viewModelScope.launch { repo.ensureOutletStates() }
@@ -266,6 +269,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     page = 0,
                     canLoadMore = first.size == 5
                 )
+                lastFetchTime = System.currentTimeMillis()
             } catch (e: Exception) {
                 _feed.value = _feed.value.copy(
                     refreshing = false,
@@ -274,6 +278,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             loadWeather()
         }
+    }
+
+    /** Called from MainActivity.onResume: only re-pull if the feed is stale
+     *  (>15 min old) so we don't hammer RSS endpoints on every resume. */
+    fun refreshIfStale() {
+        if (System.currentTimeMillis() - lastFetchTime > 15 * 60 * 1000) refreshNow()
     }
 
     fun rate(article: Article, rating: Rating) {

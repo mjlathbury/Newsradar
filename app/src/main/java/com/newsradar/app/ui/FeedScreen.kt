@@ -132,7 +132,7 @@ fun FeedScreen(vm: MainViewModel, onOpenSettings: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("NewsRadar") },
+                title = { Text("NewsRadar #${com.newsradar.app.BuildInfo.BUILD_NUMBER}") },
                 navigationIcon = {
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(Icons.Filled.Menu, contentDescription = "Menu")
