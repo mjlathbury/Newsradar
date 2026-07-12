@@ -1,6 +1,7 @@
 package com.newsradar.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +48,22 @@ import com.newsradar.app.ui.theme.RatingAmber
 import com.newsradar.app.ui.theme.RatingGreen
 import com.newsradar.app.ui.theme.RatingRed
 
+/** Story age → colour + human label. Green <4h, amber 4–8h, red 8h+. */
+private fun ageInfo(publishedAt: Long): Pair<Color, String> {
+    val hours = (System.currentTimeMillis() - publishedAt) / 3_600_000L
+    val color = when {
+        hours < 4 -> RatingGreen
+        hours < 8 -> RatingAmber
+        else -> RatingRed
+    }
+    val label = when {
+        hours < 1 -> "${maxOf(1, ((System.currentTimeMillis() - publishedAt) / 60_000L).toInt())}m ago"
+        hours < 24 -> "${hours}h ago"
+        else -> "${hours / 24}d ago"
+    }
+    return color to label
+}
+
 @Composable
 fun ArticleCard(
     article: Article,
@@ -59,12 +76,14 @@ fun ArticleCard(
     onRate: (Rating) -> Unit
 ) {
     val current = Rating.entries.firstOrNull { it.name == article.rating } ?: Rating.NONE
+    val (ageColor, ageLabel) = ageInfo(article.publishedAt)
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
         shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(2.dp, ageColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
         Column {
@@ -102,6 +121,13 @@ fun ArticleCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = ageLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ageColor,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(

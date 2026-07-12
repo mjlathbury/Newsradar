@@ -28,14 +28,13 @@ object ArticleFetcher {
 
     /** Returns the main article text, or null if it can't be read. */
     suspend fun fetchText(link: String): String? = withContext(Dispatchers.IO) {
+        // Clean the link first: Daily Mail RSS serves tracking-wrapped URLs that
+        // 410 (Gone). Strip query params and normalise to the .co.uk article host.
+        val cleanLink = link
+            .substringBefore("?")
+            .replace("dailymail.com", "dailymail.co.uk")
+            .replace("https://www.dailymail.co.uk/news/article-1490", "https://www.dailymail.co.uk/news")
         try {
-            // Clean the link first: Daily Mail RSS serves tracking-wrapped URLs that
-            // 410 (Gone). Strip query params and normalise to the .co.uk article host.
-            val cleanLink = link
-                .substringBefore("?")
-                .replace("dailymail.com", "dailymail.co.uk")
-                .replace("https://www.dailymail.co.uk/news/article-1490", "https://www.dailymail.co.uk/news")
-
             val doc = Jsoup.connect(cleanLink)
                 .userAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
@@ -67,6 +66,12 @@ object ArticleFetcher {
                 .joinToString("\n\n")
             if (text.isBlank()) null else text.take(8000)
         } catch (e: Exception) {
+            // Surface the real failure (e.g. 410 on Daily Mail tracking links, SSL,
+            // timeout) so it can be diagnosed from Settings → Debug instead of failing
+            // silently and falling back to a too-short blurb.
+            com.newsradar.app.CrashLogger.record(
+                RuntimeException("ArticleFetcher.fetchText failed for $cleanLink", e)
+            )
             null
         }
     }
