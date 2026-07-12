@@ -29,7 +29,14 @@ object ArticleFetcher {
     /** Returns the main article text, or null if it can't be read. */
     suspend fun fetchText(link: String): String? = withContext(Dispatchers.IO) {
         try {
-            val doc = Jsoup.connect(link)
+            // Clean the link first: Daily Mail RSS serves tracking-wrapped URLs that
+            // 410 (Gone). Strip query params and normalise to the .co.uk article host.
+            val cleanLink = link
+                .substringBefore("?")
+                .replace("dailymail.com", "dailymail.co.uk")
+                .replace("https://www.dailymail.co.uk/news/article-1490", "https://www.dailymail.co.uk/news")
+
+            val doc = Jsoup.connect(cleanLink)
                 .userAgent("Mozilla/5.0 (Linux; Android) NewsRadar/1.0")
                 .timeout(15000)
                 .get()
@@ -37,13 +44,19 @@ object ArticleFetcher {
             // Strip ad / promo / related / footer noise first.
             for (sel in JUNK_SELECTORS) doc.select(sel).remove()
 
-            // Prefer common article containers; fall back to <p> tags site-wide.
-            val candidates = doc.select("article p, .article-body p, .story-body p, main p, p")
+            // Prefer a real article container; fall back to <p> across the page.
+            val candidates = doc.select(
+                "article p, .article-body p, .story-body p, .article__body p, " +
+                    ".js-article-body p, main p, .content p, p"
+            )
             val text = candidates.map { it.text().trim() }
-                .filter { it.length > 40 }          // drop nav/boilerplate one-liners
+                // drop nav/boilerplate one-liners AND huge single-line menu blobs
+                .filter { it.length in 40..400 }
                 .filter { !it.contains("Cookie Policy", ignoreCase = true) }
                 .filter { !it.contains("Subscribe to", ignoreCase = true) }
                 .filter { !it.contains("Sign up to", ignoreCase = true) }
+                .filter { !it.contains("More from", ignoreCase = true) }
+                .filter { !it.contains("©", ignoreCase = true) }
                 .distinct()
                 .joinToString("\n\n")
             if (text.isBlank()) null else text.take(8000)

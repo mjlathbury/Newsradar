@@ -292,6 +292,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setSeedInterests(words: List<String>) = viewModelScope.launch {
         settings.setSeedInterests(words)
         repo.applySeeds(words)
+        // Re-rank the visible feed immediately so the new interests take effect
+        // without the user having to manually refresh.
+        val first = repo.getFeedPage(0)
+        _feed.value = FeedUiState(
+            articles = first,
+            reasons = buildReasons(first),
+            page = 0,
+            canLoadMore = first.size == 5
+        )
     }
     fun setShowDateBar(enabled: Boolean) = viewModelScope.launch {
         settings.setShowDateBar(enabled)
