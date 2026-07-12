@@ -76,10 +76,18 @@ class RssFetcher {
             .map { it.trim() }
             .filter { it.isNotBlank() }
             // Drop consent / cookie-wall boilerplate that some feeds embed in
-            // content:encoded (e.g. Evening Standard via Google JCP / Exco Player).
+            // content:encoded (e.g. Evening Standard via Google JCP / Exco Player,
+            // plus newsletter / privacy sign-up prompts).
             .filter { !it.contains("cookie", ignoreCase = true) }
             .filter { !it.contains("consent", ignoreCase = true) }
             .filter { !it.contains("privacy policy", ignoreCase = true) }
+            .filter { !it.contains("privacy notice", ignoreCase = true) }
+            .filter { !it.contains("award-winning daily news", ignoreCase = true) }
+            .filter { !it.contains("i would like to be emailed", ignoreCase = true) }
+            .filter { !it.contains("offers", ignoreCase = true) }
+            .filter { !it.contains("event and updates", ignoreCase = true) }
+            .filter { !it.contains("newsletter", ignoreCase = true) }
+            .filter { !it.contains("sign in", ignoreCase = true) }
             .filter { !it.contains("Allow and Continue", ignoreCase = true) }
             .filter { !it.contains("Custom Search", ignoreCase = true) }
             .filter { !it.contains("provided by", ignoreCase = true) }

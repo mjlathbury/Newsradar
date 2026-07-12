@@ -57,8 +57,9 @@ object ArticleFetcher {
                     ".js-article-body p, main p, .content p, p"
             )
             val text = candidates.map { it.text().trim() }
-                // drop nav/boilerplate one-liners AND huge single-line menu blobs
-                .filter { it.length in 40..400 }
+                // drop nav/boilerplate one-liners; allow longer paragraphs (up to 600)
+                // so full sentences aren't discarded — keeps summaries a proper read.
+                .filter { it.length in 40..600 }
                 .filter { !it.contains("Cookie Policy", ignoreCase = true) }
                 .filter { !it.contains("Subscribe to", ignoreCase = true) }
                 .filter { !it.contains("Sign up to", ignoreCase = true) }
@@ -72,16 +73,40 @@ object ArticleFetcher {
                 .filter { !it.contains("cookie", ignoreCase = true) }
                 .filter { !it.contains("consent", ignoreCase = true) }
                 .filter { !it.contains("privacy policy", ignoreCase = true) }
+                .filter { !it.contains("privacy notice", ignoreCase = true) }
+                .filter { !it.contains("award-winning daily news", ignoreCase = true) }
+                .filter { !it.contains("i would like to be emailed", ignoreCase = true) }
+                .filter { !it.contains("offers", ignoreCase = true) }
+                .filter { !it.contains("event and updates", ignoreCase = true) }
+                .filter { !it.contains("newsletter", ignoreCase = true) }
+                .filter { !it.contains("sign in", ignoreCase = true) }
                 .filter { !it.contains("Allow and Continue", ignoreCase = true) }
                 .filter { !it.contains("Custom Search", ignoreCase = true) }
                 .filter { !it.contains("provided by", ignoreCase = true) }
                 .distinct()
                 .joinToString("\n\n")
             // If what we got back is essentially just a consent wall (no real article
-            // body), treat the fetch as failed so we fall back to the RSS blurb.
-            if (text.isBlank() || text.contains("we need your consent", ignoreCase = true)
+            // body), treat the fetch as failed so we fall back to the RSS blurb, and
+            // log it so the on-device failure is visible in Settings → Debug.
+            val isConsentWall = text.contains("we need your consent", ignoreCase = true)
                 || text.contains("may use cookies", ignoreCase = true)
-            ) null else text.take(8000)
+                || text.contains("your consent", ignoreCase = true)
+            if (text.isBlank() || isConsentWall) {
+                com.newsradar.app.CrashLogger.record(
+                    RuntimeException("ArticleFetcher: consent wall / no body for $cleanLink (len=${text.length})")
+                )
+                null
+            } else {
+                // Anything shorter than ~300 chars means we scraped the wrong thing
+                // (a stub, a nav shell, etc.) rather than the article — log it so the
+                // failure is visible in Settings → Debug instead of looking "fine".
+                if (text.length < 300) {
+                    com.newsradar.app.CrashLogger.record(
+                        RuntimeException("ArticleFetcher: suspiciously short body for $cleanLink (len=${text.length})")
+                    )
+                }
+                text.take(8000)
+            }
         } catch (e: Exception) {
             // Surface the real failure (e.g. 410 on Daily Mail tracking links, SSL,
             // timeout) so it can be diagnosed from Settings → Debug instead of failing
