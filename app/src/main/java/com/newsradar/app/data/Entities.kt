@@ -41,12 +41,16 @@ data class KeywordWeight(
     val docCount: Int
 )
 
-/** Learned weight for an outlet, plus enabled/disabled toggle from Settings. */
+/** Learned weight for an outlet, plus enabled/disabled toggle from Settings.
+ *  `readQuality` is the user's per-provider rating of how well the in-app reader
+ *  extracts that outlet's articles: "" (unrated), "GREEN" (clean), "AMBER" (some
+ *  issues), "RED" (broken). Shown as a coloured dot in Settings. */
 @Entity(tableName = "outlet_state")
 data class OutletState(
     @PrimaryKey val outletId: String,
     val enabled: Boolean = true,
-    val weight: Double = 0.0
+    val weight: Double = 0.0,
+    val readQuality: String = ""
 )
 
 /** Partial-update projection: updates only the `score` column of an article. */

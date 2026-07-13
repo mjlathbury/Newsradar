@@ -147,6 +147,55 @@ class Recommender(private val dao: NewsDao) {
         rescoreAll()
     }
 
+    /**
+     * Revert a previous rating: subtract the learning deltas it added (token +
+     * outlet + entity affinity) so the model returns to its prior state. Called
+     * by the rating "failsafe" — tapping the active rating again clears it.
+     * If [prev] is NONE there is nothing to undo.
+     */
+    suspend fun unrate(article: Article, prev: Rating) {
+        if (prev == Rating.NONE) { rescoreAll(); return }
+
+        // 1. reverse legacy token + outlet learning
+        val d = -delta(prev)
+        val tokens = Tokeniser.tokenise("${article.title} ${article.summary}").toSet()
+        val existing = dao.getKeywords(tokens.toList()).associateBy { it.keyword }
+        val updatedKeywords = tokens.mapNotNull { t ->
+            val cur = existing[t] ?: return@mapNotNull null
+            KeywordWeight(t, cur.weight + d, cur.docCount + 1)
+        }
+        if (updatedKeywords.isNotEmpty()) dao.upsertKeywords(updatedKeywords)
+
+        val os = dao.getOutletState(article.outletId)
+        if (os != null) dao.upsertOutletState(os.copy(weight = os.weight + d * 0.25))
+
+        // 2. reverse entity learning
+        val ents = dao.entitiesForArticle(article.id)
+        if (ents.isNotEmpty()) {
+            val ed = -when (prev) {
+                Rating.GREEN -> Scorer.ENTITY_DELTA_GREEN
+                Rating.AMBER -> Scorer.ENTITY_DELTA_AMBER
+                Rating.RED -> Scorer.ENTITY_DELTA_RED
+                else -> 0.0
+            }
+            val existingEnt = dao.getEntityAffinities(ents.map { it.entityKey })
+                .associateBy { it.entityKey }
+            val updatedEnt = ents.mapNotNull { e ->
+                val cur = existingEnt[e.entityKey] ?: return@mapNotNull null
+                EntityAffinity(
+                    entityKey = e.entityKey,
+                    rawText = e.rawText,
+                    type = e.type,
+                    affinity = cur.affinity + ed,
+                    docCount = (cur.docCount + 1).coerceAtLeast(0),
+                    lastTouched = cur.lastTouched
+                )
+            }
+            if (updatedEnt.isNotEmpty()) dao.upsertEntityAffinities(updatedEnt)
+        }
+        rescoreAll()
+    }
+
     /** Human-readable reason: top matched positive keywords for an article. */
     suspend fun matchReasons(article: Article, max: Int = 3): List<String> {
         val tokens = Tokeniser.tokenise("${article.title} ${article.summary}").toSet()

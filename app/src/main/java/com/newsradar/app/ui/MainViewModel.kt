@@ -113,6 +113,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val result = if (fetched != null && fetched.length >= MIN_READER_LEN) {
                 // Cache for offline reads next time.
                 repo.cacheArticleBody(article.id, fetched)
+                // Implicit training: opening an article and reading it (without
+                // explicitly rating) counts as a neutral "amber" signal, so the
+                // model learns from reads even when the user skips the buttons.
+                // Only fires once, for articles that are still unrated.
+                if (article.rating == Rating.NONE.name) {
+                    repo.rate(article.copy(rating = Rating.AMBER.name), Rating.AMBER)
+                }
                 ReaderState(body = fetched)
             } else {
                 val attempts = (existing?.failedAttempts ?: 0) + 1
@@ -324,12 +331,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun rate(article: Article, rating: Rating) {
         viewModelScope.launch {
-            repo.rate(article, rating)
-            val updated = if (rating == Rating.RED) {
+            val prev = Rating.entries.firstOrNull { it.name == article.rating } ?: Rating.NONE
+            // Failsafe: tapping the rating the article already has reverts it back to
+            // unrated (clears the learning), so any mis-tap can be undone instantly.
+            val newRating = if (prev == rating) Rating.NONE else rating
+            if (newRating == Rating.NONE) {
+                repo.unrate(article, prev)
+            } else {
+                repo.rate(article, newRating)
+            }
+            val updated = if (newRating == Rating.RED) {
+                // RED hides from the current feed view; re-rating later brings it back.
                 _feed.value.articles.filterNot { it.id == article.id }
             } else {
                 _feed.value.articles.map {
-                    if (it.id == article.id) it.copy(rating = rating.name) else it
+                    if (it.id == article.id) it.copy(rating = newRating.name) else it
                 }
             }
             _feed.value = _feed.value.copy(articles = updated)
@@ -386,6 +402,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // right away (don't wait for a manual pull — otherwise a freshly-enabled
         // outlet shows nothing until the user refreshes). Mirrors setSeedInterests.
         refreshNow()
+    }
+
+    /** Persist the user's read-quality rating for a provider (GREEN/AMBER/RED/""). */
+    fun setOutletReadQuality(id: String, quality: String) = viewModelScope.launch {
+        repo.setOutletReadQuality(id, quality)
     }
 
     fun setUserName(name: String) {

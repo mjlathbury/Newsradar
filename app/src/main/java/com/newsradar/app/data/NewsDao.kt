@@ -60,9 +60,14 @@ interface NewsDao {
     @Query(
         "SELECT * FROM articles WHERE rating != 'RED' " +
         "AND outletId IN (:enabledOutletIds) " +
+        "AND publishedAt >= :minPublishedAt " +
         "ORDER BY score DESC, publishedAt DESC LIMIT :limit OFFSET :offset"
     )
-    suspend fun getFeedPage(limit: Int, offset: Int, enabledOutletIds: List<String>): List<Article>
+    suspend fun getFeedPage(
+        limit: Int, offset: Int,
+        enabledOutletIds: List<String>,
+        minPublishedAt: Long = 0L
+    ): List<Article>
 
     /** Ids (from [ids]) that already exist in the articles table. Used to skip
      *  redundant on-device entity extraction for unchanged articles on refresh. */
@@ -73,9 +78,10 @@ interface NewsDao {
     @Query(
         "SELECT * FROM articles WHERE rating != 'RED' " +
         "AND outletId IN (:enabledOutletIds) " +
+        "AND publishedAt >= :minPublishedAt " +
         "ORDER BY RANDOM() LIMIT :limit"
     )
-    suspend fun getFeedRandom(limit: Int, enabledOutletIds: List<String>): List<Article>
+    suspend fun getFeedRandom(limit: Int, enabledOutletIds: List<String>, minPublishedAt: Long = 0L): List<Article>
 
     @Query("UPDATE articles SET rating = :rating WHERE id = :id")
     suspend fun setRating(id: String, rating: String)
@@ -111,6 +117,9 @@ interface NewsDao {
     // ---- Outlet state ----
     @Upsert
     suspend fun upsertOutletState(state: OutletState)
+
+    @Query("UPDATE outlet_state SET readQuality = :quality WHERE outletId = :id")
+    suspend fun setOutletReadQuality(id: String, quality: String)
 
     @Query("SELECT * FROM outlet_state")
     fun observeOutletStates(): kotlinx.coroutines.flow.Flow<List<OutletState>>

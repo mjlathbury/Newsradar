@@ -57,4 +57,48 @@ object Outlets {
     private val GATED = setOf("dailyrecord")
 
     fun isGated(id: String): Boolean = id in GATED
+
+    /**
+     * Human-readable reason a gated outlet can't use the in-app reader and is
+     * opened in the system browser instead. Shown to the user in a dialog so the
+     * behaviour isn't mysterious.
+     */
+    fun gatedReason(id: String): String = when (id) {
+        "telegraph" -> "The Telegraph is behind a paywall. NewsRadar can't extract its full article text, so it opens in your browser — a subscription may be required to read the whole piece."
+        "ft" -> "The Financial Times is behind a paywall. NewsRadar can't extract its full article text, so it opens in your browser — a subscription may be required to read the whole piece."
+        "dailyrecord" -> "Daily Record serves a consent wall that blocks the reader. It opens in your browser instead, where you can accept and read it."
+        else -> "This outlet can't be shown in the in-app reader, so it opens in your browser."
+    }
+
+    /**
+     * Developer-set read-quality rating per provider (our QA findings). Shown as a
+     * read-only dot in Settings so users can see which sources read cleanly in the
+     * in-app reader. This is NOT user-editable — we update it as we improve
+     * extraction. GREEN = clean, AMBER = some issues, RED = broken/black,
+     * "" = not yet rated.
+     */
+    // Ratings are ONLY recorded once YOU have actually tested the provider in the
+    // in-app reader during the QA pass. Anything absent here is unrated (blank dot)
+    // until tested — never pre-filled from offline replicas or subagent checks.
+    private val READ_QUALITY: Map<String, String> = mapOf(
+        "bbc" to "GREEN",         // verified clean by app extraction
+        "bbc_uk" to "AMBER",      // user-tested: minor stray end items
+        "guardian" to "GREEN",    // verified 8000/23, 5934/13 clean
+        "independent" to "GREEN", // verified 3951/21, 2016/19 (bookmark junk stripped)
+        "sky" to "AMBER",         // WebView-only (403 server wall); WebView improved, verify on-device
+        "mirror" to "GREEN",      // verified 8000/62, 3464/16 clean
+        "metro" to "GREEN",       // verified 2999/26, 2879/24 (tail promos stripped)
+        "mail" to "AMBER",        // link-heavy guard added (was "just links"); verify on-device
+        "express" to "AMBER",     // articleBody selector + header fix; WAF transient on sandbox, verify
+        "standard" to "GREEN",    // verified 2561/13, 4115/25 clean
+        "huffpost" to "AMBER",    // user-tested AMBER; entry__body selector added
+        "inews" to "GREEN",       // verified 3722/21, 4198/26 clean
+        "dailyrecord" to "BLACK", // gated -> opens in browser (expected)
+        "scotsman" to "GREEN",    // verified 1816/13, 4641/20 (Comments tail stripped)
+        "walesonline" to "GREEN", // verified 5733/35, 1670/8 (live-blog artifact stripped)
+        "telegraph" to "BLACK",   // 403 server wall -> opens in browser (expected)
+        "ft" to "BLACK"           // paywall -> opens in browser (expected)
+    )
+
+    fun readQuality(id: String): String = READ_QUALITY[id] ?: ""
 }

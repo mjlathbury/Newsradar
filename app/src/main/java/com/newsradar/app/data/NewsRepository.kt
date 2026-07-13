@@ -39,6 +39,11 @@ class NewsRepository private constructor(context: Context) {
         dao.upsertOutletState(os.copy(enabled = enabled))
     }
 
+    /** Persist the user's read-quality rating for a provider (GREEN/AMBER/RED/""). */
+    suspend fun setOutletReadQuality(outletId: String, quality: String) {
+        dao.setOutletReadQuality(outletId, quality)
+    }
+
     /** The daily (or manual) refresh: fetch -> store -> rescore -> prune. */
     suspend fun refresh(): Int {
         val refreshStart = System.currentTimeMillis()
@@ -137,6 +142,12 @@ class NewsRepository private constructor(context: Context) {
      *        exploration pool skips these so the user never sees duplicates.
      */
     private val EXPLORATION_RATIO = 0.3 // share of each page that is random exploration
+    // Cap of keyword-matched (guided) stories per page so the feed never becomes a
+    // monotone wall of "more of the same" — at most 3 of every 5 are interest-driven;
+    // the rest are exploration so the model keeps learning. (User request.)
+    private val MAX_GUIDED_PER_PAGE = 3
+    // Articles older than this are dropped from the feed (user request: >24h ignored).
+    private val FEED_MAX_AGE_MS = 24L * 60 * 60 * 1000
 
     suspend fun getFeedPage(
         page: Int,
@@ -150,14 +161,19 @@ class NewsRepository private constructor(context: Context) {
         val enabled = dao.getOutletStates().filter { it.enabled }.map { it.outletId }
         if (enabled.isEmpty()) return emptyList()
         val guidedCount = (pageSize * (1 - EXPLORATION_RATIO)).toInt().coerceAtLeast(1)
+            .coerceAtMost(MAX_GUIDED_PER_PAGE) // never let >3 of 5 be interest-driven
         val exploreCount = (pageSize - guidedCount).coerceAtLeast(1)
 
+        // 24h age cutoff is enforced in SQL (minPublishedAt) so pagination pages
+        // over fresh articles and a full page of 5 still sets canLoadMore=true.
+        val minPublishedAt = System.currentTimeMillis() - FEED_MAX_AGE_MS
+
         // Guided offset is based on guidedCount (we only pull guidedCount per page).
-        val guided = dao.getFeedPage(guidedCount, page * guidedCount, enabled)
+        val guided = dao.getFeedPage(guidedCount, page * guidedCount, enabled, minPublishedAt)
         val guidedIds = guided.map { it.id }.toSet()
 
         // Pull a larger random pool, then drop anything already shown so no duplicates.
-        val randomPool = dao.getFeedRandom(exploreCount * 4 + pageSize, enabled)
+        val randomPool = dao.getFeedRandom(exploreCount * 4 + pageSize, enabled, minPublishedAt)
             .filter { it.id !in excludeIds && it.id !in guidedIds }
         val explore = randomPool.take(exploreCount)
 
@@ -182,7 +198,7 @@ class NewsRepository private constructor(context: Context) {
         // guided stories if the random pool came up short.
         var backfill = page * guidedCount + guided.size
         while (merged.size < pageSize) {
-            val extra = dao.getFeedPage(1, backfill, enabled).firstOrNull() ?: break
+            val extra = dao.getFeedPage(1, backfill, enabled, minPublishedAt).firstOrNull() ?: break
             if (extra.id in excludeIds || merged.any { it.id == extra.id }) {
                 backfill++
                 continue
@@ -195,6 +211,11 @@ class NewsRepository private constructor(context: Context) {
 
     suspend fun rate(article: Article, rating: Rating) {
         recommender.applyRatingV2(article, rating)
+    }
+
+    /** Revert a prior rating (toggle-to-NONE failsafe): undo its learning. */
+    suspend fun unrate(article: Article, prev: Rating) {
+        recommender.unrate(article, prev)
     }
 
     /**

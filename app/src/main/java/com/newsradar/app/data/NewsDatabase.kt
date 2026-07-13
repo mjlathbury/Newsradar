@@ -13,7 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         EntityAffinity::class, ArticleEntity::class, ExplicitDislike::class,
         ReadHistory::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class NewsDatabase : RoomDatabase() {
@@ -44,6 +44,14 @@ abstract class NewsDatabase : RoomDatabase() {
             }
         }
 
+        /** Additive migration 5 -> 6: add the user's per-provider read-quality
+         *  rating column to outlet_state (no data loss; defaults to ""). */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE outlet_state ADD COLUMN readQuality TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun get(context: Context): NewsDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -51,7 +59,7 @@ abstract class NewsDatabase : RoomDatabase() {
                     NewsDatabase::class.java,
                     "newsradar.db"
                 ).fallbackToDestructiveMigration()
-                    .addMigrations(MIGRATION_4_5).build().also { INSTANCE = it }
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6).build().also { INSTANCE = it }
             }
     }
 }

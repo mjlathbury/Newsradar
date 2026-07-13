@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -59,6 +61,9 @@ import com.newsradar.app.prefs.RatingDisplay
 import com.newsradar.app.prefs.ReaderFont
 import com.newsradar.app.prefs.ReaderSize
 import com.newsradar.app.prefs.ThemeMode
+import com.newsradar.app.ui.theme.RatingAmber
+import com.newsradar.app.ui.theme.RatingGreen
+import com.newsradar.app.ui.theme.RatingRed
 import com.newsradar.app.weather.WeatherProvider
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -194,6 +199,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 Outlets.ALL.forEach { outlet ->
                     val enabled = outletStates.firstOrNull { it.outletId == outlet.id }?.enabled
                         ?: outlet.defaultEnabled
+                    val quality = Outlets.readQuality(outlet.id)
                     Row(
                         Modifier.fillMaxWidth()
                             .clickable { vm.setOutletEnabled(outlet.id, !enabled) }
@@ -202,6 +208,21 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // Read-quality dot: developer-set (our QA ratings), shown
+                            // read-only so users can see which providers read cleanly.
+                            val dotColor = when (quality) {
+                                "GREEN" -> RatingGreen
+                                "AMBER" -> RatingAmber
+                                "RED" -> RatingRed
+                                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+                            }
+                            Box(
+                                Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                            )
+                            Spacer(Modifier.width(10.dp))
                             Text(outlet.name, style = MaterialTheme.typography.bodyLarge)
                             if (outlet.paywall != Paywall.NONE) {
                                 Spacer(Modifier.width(6.dp))
@@ -219,6 +240,13 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         )
                     }
                 }
+                Text(
+                    "The dot shows how well each source reads in the app reader: " +
+                        "green = clean, amber = some issues, red = broken. " +
+                        "Blank = not yet rated.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // ---- Interests ----

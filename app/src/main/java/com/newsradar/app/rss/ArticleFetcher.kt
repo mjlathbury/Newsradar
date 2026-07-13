@@ -13,11 +13,14 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import net.dankito.readability4j.extended.Readability4JExtended
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.util.concurrent.TimeUnit
 
 /**
  * On-demand fetcher for an article's full text. Only invoked when the user taps
@@ -59,10 +62,41 @@ object ArticleFetcher {
         // BBC: related-links + topic chips + "Follow … news" CTA sit inside <article>
         "div[data-component=links-block]", "div[data-component=tag-list-block]",
         "div[data-component=follow-block]", "p[id^=follow-]",
+        // BBC: trailing "Get in touch" / contact-promo block that leaks past <article>
+        "[data-component=contact-block]", "[class*=get-in-touch]", "[class*=getintouch]",
+        "[id*=contact-block]", "[class*=share-block]",
         // Independent: taboola/teads in-article promos + newsletter aside
         "[class*=teads]", "aside.newsletter-component",
-        "figure figcaption", ".caption", ".credit"
+        "figure figcaption", ".caption", ".credit",
+        // Daily Mail: related-stories / "more stories" link lists that otherwise
+        // leak into .article-text as a wall of cross-promo links.
+        "[class*=article-related]", "[class*=related-articles]", "[class*=story-list]",
+        "[class*=mol-related]", "[class*=linkList]", "[class*=more-stories]",
+        "[class*=read-more]", "[id*=related]",
+        // HuffPost: recirc / "Read this next" / section cross-promo blocks whose
+        // anchor text reads like prose and leaks into the body.
+        "[class*=recirc]", "[class*=entry__embed]", "[class*=card__headline]",
+        "[class*=related-posts]", "[class*=stream-item]", "[class*=vertical-related]",
+        // Cluster C (broadcast / regional / paywall) — Sky, Scotsman, FT, Telegraph:
+        // precise junk blocks that leak past <article> (newsletter forms, comments,
+        // related/recirc, trust/share CTAs). Verified 2026-07-13 by subagent probe.
+        "[class*=article-author-job-title]", "[class*=newsletter-heading]",
+        "[class*=newsletter-message]", "[class*=socials-comments]",
+        "[class*=commentButton]", "[class*=Viafoura]", "[data-taboola-placement]",
+        "[class*=sdc-related]", "[class*=sdc-social]", "[class*=sdc-trust]",
+        "[class*=sdc-share]", "[class*=more-on]",
+        "[class*=in-article-sign-up]", "[class*=myFT]", "[class*=article__more]",
+        "[class*=share__list]", "[class*=follow]", "[id*=comments]",
+        "[class*=article__share]", "[class*=article__comments]",
+        "[class*=more-from]", "[class*=see-also]",
+        // Independent / Wales Online / Metro: bookmark + "Comments for …" + save CTAs
+        // that leak into the body tail as prose-like lines.
+        "[class*=bookmark]", "[class*=save-story]", "[class*=story-saved]",
+        "[class*=my-bookmarks]", "[class*=comments-wrapper]", "[class*=comments-block]",
+        "[class*=share-this]", "[class*=article-tools]", "[class*=social-share]",
+        "[class*=notify-me]", "[class*=sign-up-cta]"
     )
+
 
     // Per-site container selectors tried first (fast, precise), then generic
     // fallbacks. Verified 2026-07-12 by an on-device-style headless-browser probe:
@@ -84,6 +118,13 @@ object ArticleFetcher {
         "div.article__content__inner",     // Metro article body (precise; bare <article> leaks promos)
         ".article-body", ".story-body", ".article__body", ".js-article-body",
         ".content", ".post-content", ".entry-content",
+        "[class*=sdc-article-body]",          // Sky (precise)
+        "[class*=article__content]",          // FT (precise)
+        "[class*=article-body-container]",     // Telegraph (precise)
+        "[class*=js-article-body]",            // Telegraph
+        ".articleBody", "#articleBody",        // Daily Express (precise)
+        "[class*=articleBody]",                // Daily Express — camelCase (hyphenated selector misses it)
+        "[class*=entry__body]", "[class*=card__body]",  // HuffPost (precise)
         "main", "article"               // last resort (too broad — pulls tail)
     )
 
@@ -93,22 +134,76 @@ object ArticleFetcher {
         "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
+    // OkHttp client for article fetches — shares the browser UA + connection pool
+    // approach that defeats 403s on RSS (Sky hard-blocks Jsoup's own HttpClient).
+    private val HTTP_CLIENT = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+
+    /** Fetch a URL over OkHttp (browser UA + consent cookie) and parse with Jsoup.
+     *  Returns null on any non-success so callers can fall back. Full browser
+     *  header set defeats WAF fingerprinting (Express/HuffPost were returning
+     *  consent shells to a bare request), but some outlets (Independent) serve a
+     *  truncated shell when they see Sec-Fetch / DNT headers — so if the primary
+     *  fetch yields a suspiciously short body we retry with a minimal header set
+     *  and keep whichever document has more text. */
+    private fun fetchDoc(url: String): Document? {
+        val primary = buildRequest(url, fullHeaders = true)
+        val doc1 = tryParse(primary) ?: return null
+        val len1 = doc1.body()?.text()?.length ?: 0
+        if (len1 >= 600) return doc1
+        // Short body → likely a consent/wall shell. Retry with minimal headers.
+        val doc2 = tryParse(buildRequest(url, fullHeaders = false))
+        val len2 = doc2?.body()?.text()?.length ?: 0
+        return if (len2 > len1) doc2 ?: doc1 else doc1
+    }
+
+    private fun buildRequest(url: String, fullHeaders: Boolean) = Request.Builder()
+        .url(url)
+        .header("User-Agent", MOBILE_UA)
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .header("Accept-Language", "en-GB,en;q=0.9")
+        .header("Upgrade-Insecure-Requests", "1")
+        .header("Referer", "https://www.google.com/")
+        .header("Cookie", "cookie_consent=accepted; gdpr=0; cmp_consented=true; notice_preferences=2:; euconsent-v2=CPXxR4A_CPXxR4A")
+        .apply {
+            if (fullHeaders) {
+                header("Connection", "keep-alive")
+                header("Sec-Fetch-Dest", "document")
+                header("Sec-Fetch-Mode", "navigate")
+                header("Sec-Fetch-Site", "cross-site")
+                header("Sec-Fetch-User", "?1")
+                header("DNT", "1")
+                header("Cache-Control", "max-age=0")
+            }
+        }
+        .build()
+
+    private fun tryParse(req: Request): Document? {
+        val resp = HTTP_CLIENT.newCall(req).execute()
+        if (!resp.isSuccessful) { resp.close(); return null }
+        return Jsoup.parse(resp.body?.string().orEmpty())
+    }
+
     /** Returns the main article text, or null if it can't be read. */
     suspend fun fetchText(link: String, context: Context? = null): String? =
         withContext(Dispatchers.IO) {
             val cleanLink = normaliseLink(link)
             try {
-                val doc = Jsoup.connect(cleanLink)
-                    .userAgent(MOBILE_UA)
-                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    .header("Accept-Language", "en-GB,en;q=0.9")
-                    .header("Upgrade-Insecure-Requests", "1")
-                    .followRedirects(true)
-                    .timeout(30000)
-                    .maxBodySize(0)
-                    .get()
+                val doc = fetchDoc(cleanLink) ?: run {
+                    CrashLogger.record(RuntimeException("ArticleFetcher: fetch failed (null doc) for $cleanLink"))
+                    return@withContext null
+                }
 
-                val body = extractFromDoc(doc, cleanLink)?.let { sanitise(it) }
+                val extracted = extractFromDoc(doc, cleanLink)
+                val body = extracted?.let { sanitise(it) }
+                CrashLogger.diagnostic(
+                    "FETCH_BODY host=${runCatching { java.net.URL(cleanLink).host }.getOrDefault("?")} " +
+                        "httpBodyLen=${doc.body()?.text()?.length ?: 0} " +
+                        "containerLen=${extracted?.length ?: 0}"
+                )
                 if (body != null && body.length >= 120) {
                     CrashLogger.article(cleanLink, body.length, ok = true)
                     body.take(8000)
@@ -121,6 +216,24 @@ object ArticleFetcher {
                         cleanLink, body?.length ?: 0, ok = false,
                         snippet = "short-HTTP; $snippet"
                     )
+                    // TEMP DIAG: when HTTP body is short, log the best container
+                    // candidates so we can target the real mobile markup from a
+                    // device capture (datacenter IPs get consent-walled shells).
+                    runCatching {
+                        val cands = doc.select("div, article, main, section")
+                            .map { el -> Pair(el, el.text().length) }
+                            .filter { it.second >= 200 }
+                            .sortedByDescending { it.second }
+                            .take(6)
+                        val report = cands.joinToString(" | ") { (el, len) ->
+                            val cls = (el.className()?.take(60) ?: el.tagName())
+                            "${el.tagName()}[$cls]=$len"
+                        }
+                        CrashLogger.diagnostic(
+                            "CONTAINER_CANDIDATES host=${runCatching { java.net.URL(cleanLink).host }.getOrDefault("?")} " +
+                            "chosen=${extracted?.length ?: 0} top=[$report]"
+                        )
+                    }
                     tryAmp(cleanLink) ?: webViewFallback(cleanLink, context) ?: body
                 }
             } catch (e: Exception) {
@@ -139,13 +252,7 @@ object ArticleFetcher {
      */
     suspend fun fetchHeroImage(link: String): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val doc = Jsoup.connect(normaliseLink(link))
-                .userAgent(MOBILE_UA)
-                .header("Accept-Language", "en-GB,en;q=0.9")
-                .followRedirects(true)
-                .timeout(20000)
-                .maxBodySize(0)
-                .get()
+            val doc = fetchDoc(normaliseLink(link)) ?: return@runCatching null
             doc.selectFirst("meta[property=og:image]")
                 ?.attr("content")
                 ?.takeIf { it.startsWith("http") }
@@ -161,18 +268,12 @@ object ArticleFetcher {
      */
     private suspend fun tryAmp(cleanLink: String): String? = withContext(Dispatchers.IO) {
         val candidates = listOf(
-            cleanLink.trimEnd('/') + "/amp/",
-            if (cleanLink.contains("?")) "$cleanLink&amp=1" else "$cleanLink?amp=1"
+            if (cleanLink.contains("?")) "$cleanLink&amp=1" else "$cleanLink?amp=1",
+            cleanLink.trimEnd('/') + "/amp/"
         )
         for (amp in candidates) {
             val recovered = runCatching {
-                val doc = Jsoup.connect(amp)
-                    .userAgent(MOBILE_UA)
-                    .header("Accept-Language", "en-GB,en;q=0.9")
-                    .followRedirects(true)
-                    .timeout(20000)
-                    .maxBodySize(0)
-                    .get()
+                val doc = fetchDoc(amp) ?: return@runCatching null
                 val b = extractFromDoc(doc, amp)?.let { sanitise(it) }
                 if (b != null && b.length >= 300) {
                     CrashLogger.article(amp, b.length, ok = true, snippet = "amp")
@@ -201,6 +302,22 @@ object ArticleFetcher {
         if (url.isNullOrBlank()) null else UrlUtils.cleanImageUrl(url)
 
     /**
+     * True if a candidate container is mostly navigation/related links rather than
+     * prose — e.g. Daily Mail's related-stories `div.article-body` sibling that a
+     * broad selector grabs when the real body (.article-text) is absent (consent-
+     * walled on-device). Such a node has few <p>/<li> blocks and a high fraction of
+     * its text living inside <a> elements. Excluding it lets the REAL prose body win.
+     */
+    private fun isLinkHeavy(el: org.jsoup.nodes.Element): Boolean {
+        val blockCount = el.select("p, li").size
+        if (blockCount < 2) return true
+        val total = el.text().length
+        if (total == 0) return true
+        val linkText = el.select("a").sumOf { it.text().length }
+        return (linkText.toDouble() / total) > 0.5
+    }
+
+    /**
      * Extract readable article text from an already-fetched [Document], trying
      * per-site container selectors, then JSON-LD, then Readability4J.
      */
@@ -210,13 +327,14 @@ object ArticleFetcher {
 
         // 2. Per-site / generic container selectors — take the largest text block,
         //    remembering the ELEMENT (not just its flat text) so we can serialize it
-        //    into paragraph-structured blocks for the reader view.
+        //    into paragraph-structured blocks for the reader view. Skip link-heavy
+        //    nodes (related/recirc walls) so the real prose body wins over a links div.
         var bestEl: org.jsoup.nodes.Element? = null
         var bestLen = 0
         for (sel in CONTAINER_SELECTORS) {
             for (el in doc.select(sel)) {
                 val t = el.text().trim()
-                if (t.length > bestLen) { bestLen = t.length; bestEl = el }
+                if (t.length > bestLen && !isLinkHeavy(el)) { bestLen = t.length; bestEl = el }
             }
             if (bestLen >= 600 && bestEl != null) return blocksFrom(bestEl!!) // good enough
         }
@@ -247,12 +365,23 @@ object ArticleFetcher {
      */
     private fun blocksFrom(container: org.jsoup.nodes.Element): String? {
         container.select("figure, figcaption, blockquote, aside").remove()
-        // Drop dead/garbage cross-promo anchors (e.g. HuffPost's href="/v" WMO
-        // link, or ?origin=*-recirc tracking anchors) so their link-text can't
-        // leak into the prose as a plausible sentence.
+        // Drop cross-promo / navigation anchors so their headline text can't leak
+        // into the prose as a plausible paragraph. This catches related-story
+        // promos (e.g. BBC's "<a href="/news/articles/..."><p>Headline</p></a>")
+        // and other internal recirc links across all outlets. External http(s)
+        // citation links keep their text; internal "/path" nav links are removed.
         for (a in container.select("a")) {
             val href = a.attr("href").lowercase()
-            if (href.endsWith("/v") || href.contains("origin=") && href.contains("recirc")) {
+            val atext = a.text().lowercase()
+            if (href.startsWith("/") ||
+                href.contains("origin=") && href.contains("recirc") ||
+                href.endsWith("/v") ||
+                href.contains("utm_") && href.contains("recirc") ||
+                // promo / "more stories" anchors whose link text gives them away
+                atext.startsWith("arrow") || atext.startsWith("more ") ||
+                atext.contains("more stories") || atext.contains("check our news page") ||
+                atext.contains("load more") || atext.contains("see more")
+            ) {
                 a.remove()
             }
         }
@@ -290,9 +419,11 @@ object ArticleFetcher {
             l.contains("we and our partners") || l.contains("privacy policy") ||
             l.contains("privacy manager") || l.contains("do not sell") ||
             l.contains("california resident") || l.contains("most viewed") ||
-            l.contains("most read") || l == "closer" || l == "tpc test" ||
-            // BBC follow CTA
+            l.contains("most read") || l.contains("most viewed") || l == "closer" || l == "tpc test" ||
+            // BBC follow CTA + "get in touch" contact block tail
             l.contains("follow") && l.contains("news on") ||
+            l.contains("get in touch") || l.contains("contact the bbc") || l.contains("whatsapp") ||
+            l.contains("send your story") || l.contains("share with bbc") ||
             // Metro newsletter CTA (classless <p> inside body container)
             l.contains("start your day informed") ||
             l.contains("metro's news updates newsletter") ||
@@ -301,6 +432,7 @@ object ArticleFetcher {
             l == "related" || l.contains("related topics") ||
             l.contains("more in ") && l.contains("huffpost") ||
             l.startsWith("read this next") || l.startsWith("more from huffpost") ||
+            l == "more on this story" || l == "related content" || l == "related stories" ||
             // Sky inline cross-promo + trust/app promos
             l.startsWith("read more:") || l.startsWith("read more from sky news:") ||
             l.contains("why you can trust") || l.contains("install the sky news app") ||
@@ -315,6 +447,32 @@ object ArticleFetcher {
             l.contains("open comments") || l.startsWith("share on") ||
             l.contains("email this article") || l.contains("suggest a correction") ||
             l.contains("submit a tip") ||
+            // Cluster C (Sky/Scotsman/FT/Telegraph) — newsletter + recirc tails
+            l.contains("sign up to our") || l.contains("thank you for signing up") ||
+            l.contains("want to join the conversation") || l.contains("westminster correspondent") ||
+            l.contains("protected by recaptcha") || l.contains("more on ") ||
+            l.contains("stay informed with free updates") || l.contains("simply sign up to the") ||
+            l.contains("myft digest") || l.contains("reuse this content") || l.contains("add to myft") ||
+            l.contains("follow the topics") || l.contains("latest on ") ||
+            l.contains("more from the telegraph") || l.contains("see also") ||
+            l.contains("sign up to our newsletters") || l.contains("get the daily telegraph newsletter") ||
+            // Independent / Wales Online / Metro bookmark + "Comments for …" tails
+            l == "bookmark" || l == "story saved" || l.contains("my bookmarks") ||
+            l.startsWith("comments for ") || l.contains("story saved") ||
+            (l.contains("not now") && l.contains("yes please")) ||
+            l.contains("stay up to date with notifications") ||
+            l.contains("sign up to our newsletter") || l.contains("join the conversation") ||
+            l.contains("you can find this story in") || l.contains("or by navigating to the user icon") ||
+            // Independent: bookmark popover + commenting-forum tails
+            l == "bookmark popover" || l == "removed from bookmarks" ||
+            l.startsWith("comments go to comments") || l.contains("go to comments") ||
+            l.contains("join our commenting forum") || l.contains("thought-provoking conversations") ||
+            l == "more about" || l.startsWith("## more about") ||
+            // Metro / Wales Online / Scotsman tail promos + live-blog artifacts
+            l.contains("sign up now") || l.startsWith("arrow more") ||
+            l.contains("for more stories like this") || l.contains("contribute to the live blog") ||
+            l.contains("click here to read more") || l == "comments" || l.startsWith("## comments") ||
+            l.contains("read more from") || l.contains("more stories like this") ||
             line.contains("©")
     }
 
@@ -407,13 +565,22 @@ object ArticleFetcher {
                     webView.webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                             super.onPageFinished(view, loadedUrl)
+                            // Accept any JS-gated consent wall (e.g. Mirror/Reach plc)
+                            // so the real article body is revealed in the DOM before we
+                            // extract. Best-effort; ignore failure.
+                            view?.evaluateJavascript(CONSENT_ACCEPT_JS) { _ -> }
                             val scope = CoroutineScope(cont.context)
                             scope.launch {
                                 var lastLen = 0
                                 var best = ""
                                 var attempts = 0
-                                while (attempts < 10 && cont.isActive) {
+                                delay(1200) // let the CMP / consent wall finish rendering
+                                while (attempts < 14 && cont.isActive) {
                                     delay(600)
+                                    // Re-click consent each pass: the CMP usually
+                                    // loads AFTER onPageFinished, so one click at load
+                                    // is not enough to reveal the body.
+                                    view?.evaluateJavascript(CONSENT_ACCEPT_JS) { _ -> }
                                     val raw = suspendCancellableCoroutine<String> { c ->
                                         view?.evaluateJavascript(EXTRACT_JS) { res ->
                                             c.resume(res ?: "", onCancellation = {})
@@ -458,7 +625,7 @@ object ArticleFetcher {
         (function() {
           var sels = ['.article-text','[itemprop="articleBody"]','[class*="ArticleBody"]',
                       '[class*="article-body"]','.article-body','.story-body','.js-article-body',
-                      'main','.content','article'];
+                      '[class*="sdc-article-body"]','main','.content','article'];
           var best = '';
           for (var i = 0; i < sels.length; i++) {
             var els = document.querySelectorAll(sels[i]);
@@ -469,6 +636,28 @@ object ArticleFetcher {
           }
           if (!best || best.length < 200) best = (document.body.innerText || '').trim();
           return best;
+        })();
+    """
+
+    // JS that clicks the most likely consent "Accept"/"Agree" button so a
+    // JS-gated CMP (e.g. Mirror/Reach plc) reveals the article body inside the
+    // WebView before we extract. Tries common CMP button text + the
+    // Sourcepoint/OneTrust accept-all id, then a generic button containing
+    // "accept"/"agree"/"allow".
+    private const val CONSENT_ACCEPT_JS = """
+        (function() {
+          function click(el){ if(el){ try{ el.click(); return true; }catch(e){ return false; } } return false; }
+          var pick = document.querySelector('#sp-cc-accept, #notice-accept, ' +
+            '[id*="accept"], [class*="accept"], [aria-label*="Accept"]');
+          if (pick) return click(pick);
+          var btns = document.querySelectorAll('button, a.btn, [role=button]');
+          for (var i=0;i<btns.length;i++){
+            var t=(btns[i].innerText||btns[i].textContent||'').toLowerCase();
+            if (t.indexOf('accept')>=0 || t.indexOf('agree')>=0 || t.indexOf('allow all')>=0 || t.indexOf('i agree')>=0){
+              if (click(btns[i])) return true;
+            }
+          }
+          return false;
         })();
     """
 

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -27,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -79,6 +81,9 @@ fun FeedScreen(
     var readerTitle by remember { mutableStateOf("") }
     var readerOutlet by remember { mutableStateOf("") }
     var readerMode by remember { mutableStateOf(ReaderMode.READER) }
+    // When a gated (paywalled/consent-walled) outlet is opened, show a short reason
+    // before launching the system browser, so the behaviour is explained.
+    var gatedReason by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
 
     fun openCustomTab(url: String) {
@@ -90,10 +95,10 @@ fun FeedScreen(
 
     fun openArticle(a: com.newsradar.app.data.Article, mode: ReaderMode) {
         vm.recordRead(a)
-        // Known consent-gated outlets extract to a stub — skip the broken reader and
-        // open the real page in a Chrome Custom Tab instead.
+        // Known consent/paywall-gated outlets extract to a stub — explain why, then
+        // open the real page in a Chrome Custom Tab instead of the broken reader.
         if (mode == ReaderMode.READER && com.newsradar.app.data.Outlets.isGated(a.outletId)) {
-            openCustomTab(a.link)
+            gatedReason = com.newsradar.app.data.Outlets.gatedReason(a.outletId)
             return
         }
         readerArticle = a
@@ -281,6 +286,26 @@ fun FeedScreen(
                     size = readerSize,
                     onReadWeb = { readerArticle?.let { openCustomTab(it.link) } },
                     onClose = { readerOpen = false }
+                )
+            }
+
+            // Reason dialog for paywalled / consent-gated outlets: explains why the
+            // article opens in the browser rather than the in-app reader.
+            gatedReason?.let { reason ->
+                AlertDialog(
+                    onDismissRequest = { gatedReason = null },
+                    title = { Text("Opens in browser") },
+                    text = { Text(reason) },
+                    confirmButton = {
+                        Button(onClick = {
+                            gatedReason = null
+                            readerArticle?.let { openCustomTab(it.link) }
+                                ?: readerUrl.let { openCustomTab(it) }
+                        }) { Text("Open in browser") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { gatedReason = null }) { Text("Cancel") }
+                    }
                 )
             }
         }
