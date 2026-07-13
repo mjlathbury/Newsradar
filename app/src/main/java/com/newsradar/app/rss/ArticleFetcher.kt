@@ -3,6 +3,7 @@ package com.newsradar.app.rss
 import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.annotation.VisibleForTesting
 import com.newsradar.app.CrashLogger
 import com.newsradar.app.util.UrlUtils
 import kotlinx.coroutines.CoroutineScope
@@ -46,11 +47,19 @@ object ArticleFetcher {
     // Selectors for junk we explicitly drop before extracting text.
     private val JUNK_SELECTORS = arrayOf(
         "script", "style", "noscript", "iframe", "aside",
-        "[class*=ad]", "[class*=ads]", "[class*=advert]", "[id*=ad-]", "[id*=ads]",
+        // Ad / promo noise — NB: use PRECISE ad selectors. A bare `[class*=ad]`
+        // matches the substring "ad" inside unrelated classes (e.g. Daily Mail's
+        // "headADing-tag-switch" body article) and deletes the real body. Target
+        // actual ad containers only.
+        "[class*=advert]", "[class*=ads-]", "[class*=ad-]", "[id*=ad-slot]",
+        "[id*=ads]", "[class*=ad-banner]", "[class*=ad-container]", "[class*=google-ad]",
+        "[class*=dfp]", "[class*=adsense]",
         "[class*=promo]", "[class*=newsletter]", "[class*=subscribe]",
-        "[class*=related]", "[class*=recommended]", "[class*=more-story]",
+        // Related/recirc — precise: "related-" / "recirc" only, NOT a bare
+        // [class*=related] which can match body wrappers.
+        "[class*=related-]", "[class*=recommended]", "[class*=more-story]",
         "[class*=story-list]", "[class*=carousel]", "[class*=gallery]",
-        "[class*=social]", "[class*=share]", "[class*=meta]", "[class*=byline]",
+        "[class*=social]", "[class*=share]", "[class*=byline]",
         "[class*=cookie]", "[class*=banner]", "[class*=newsletter-signup]",
         "[class*=taboola]", "[class*=outbrain]", "[class*=zn-player]",
         // Guardian + generic page-tail / promo blocks that leak past <main>
@@ -68,11 +77,15 @@ object ArticleFetcher {
         // Independent: taboola/teads in-article promos + newsletter aside
         "[class*=teads]", "aside.newsletter-component",
         "figure figcaption", ".caption", ".credit",
-        // Daily Mail: related-stories / "more stories" link lists that otherwise
-        // leak into .article-text as a wall of cross-promo links.
+        // Daily Mail: related-stories / "more stories" / NEXT STORIES carousel link
+        // lists that otherwise leak into the body as a wall of cross-promo links
+        // (the "Next Stories1/30 ..." block). Strip before selection so the real
+        // <article> body wins.
         "[class*=article-related]", "[class*=related-articles]", "[class*=story-list]",
         "[class*=mol-related]", "[class*=linkList]", "[class*=more-stories]",
-        "[class*=read-more]", "[id*=related]",
+        "[class*=read-more]", "[id*=related]", "[class*=next-stories]",
+        "[id*=next-stories]", "[class*=taboola]", "[class*=video-strip]",
+        "[class*=most-read]", "[class*=recirc]",
         // HuffPost: recirc / "Read this next" / section cross-promo blocks whose
         // anchor text reads like prose and leaks into the body.
         "[class*=recirc]", "[class*=entry__embed]", "[class*=card__headline]",
@@ -124,6 +137,10 @@ object ArticleFetcher {
         "[class*=js-article-body]",            // Telegraph
         ".articleBody", "#articleBody",        // Daily Express (precise)
         "[class*=articleBody]",                // Daily Express — camelCase (hyphenated selector misses it)
+        // Daily Mail (modern variant): body is <article class="heading-tag-switch">
+        // holding the mol-para paragraphs; the recirc "Next Stories" is a sibling
+        // <div class="next-stories"> that is now stripped via JUNK_SELECTORS.
+        "[class*=heading-tag-switch]",
         "[class*=entry__body]", "[class*=card__body]",  // HuffPost (precise)
         "main", "article"               // last resort (too broad — pulls tail)
     )
@@ -356,6 +373,14 @@ object ArticleFetcher {
         }
     }
 
+    /** Test-only: run the real extraction pipeline on a raw HTML string so QA can
+     *  compare what the app collects against the full page, without network. */
+    @VisibleForTesting
+    fun extractFromHtmlForTest(rawHtml: String, url: String): String? {
+        val doc = Jsoup.parse(rawHtml)
+        return extractFromDoc(doc, url)
+    }
+
     /**
      * Serialize the chosen article container into clean paragraph blocks so the
      * reader can render real paragraph breaks and subheadings. Drops figures,
@@ -457,7 +482,9 @@ object ArticleFetcher {
             l.contains("want to join the conversation") || l.contains("westminster correspondent") ||
             l.contains("protected by recaptcha") || l.contains("more on ") ||
             l.contains("stay informed with free updates") || l.contains("simply sign up to the") ||
-            l.contains("myft digest") || l.contains("reuse this content") || l.contains("add to myft") ||
+            // Daily Mail newsletter / "preferred source" tail that leaks above the body
+            l.contains("sign up here to our") || l.contains("preferred source") ||
+            l.contains("see more daily mail") || l.contains("save us as a preferred") ||
             l.contains("follow the topics") || l.contains("latest on ") ||
             l.contains("more from the telegraph") || l.contains("see also") ||
             l.contains("sign up to our newsletters") || l.contains("get the daily telegraph newsletter") ||
