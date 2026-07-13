@@ -103,6 +103,9 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // ---- Brand mark (recolours to the chosen colour scheme) ----
+            BrandLogo(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+
             // ---- Profile ----
             SettingsSection("Profile") {
                 OutlinedTextField(
