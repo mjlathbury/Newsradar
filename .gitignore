@@ -9,4 +9,9 @@
 .cxx/
 app/build/
 *.apk
+
+# Delivery artifact: the committed APK for phone download. It is refreshed by the
+# deliver script (force-added) on each build; the nightly backup must NOT re-push
+# it. Keep it ignored in the working tree so `git add -A` skips it.
+/delivery/
 *.keystore
