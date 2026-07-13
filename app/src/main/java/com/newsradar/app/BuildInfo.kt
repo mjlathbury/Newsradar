@@ -2,8 +2,8 @@ package com.newsradar.app
 
 /**
  * Monotonic build number, bumped by +1 on every compile/push. Shown in the feed
- * top bar so it's easy to confirm which APK is installed. Current: 87.
+ * top bar so it's easy to confirm which APK is installed. Current: 89.
  */
 object BuildInfo {
-    const val BUILD_NUMBER = 87
+    const val BUILD_NUMBER = 89
 }

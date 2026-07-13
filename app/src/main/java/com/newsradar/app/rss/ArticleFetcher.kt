@@ -438,7 +438,8 @@ object ArticleFetcher {
             l.contains("why you can trust") || l.contains("install the sky news app") ||
             l.contains("be the first to get breaking news") ||
             l.contains("see more sky news in google") || l.contains("related topics") ||
-            l.startsWith("image:") ||
+            l.startsWith("image:") || l.startsWith("pic:") || l.startsWith("video:") ||
+            l.contains("istock") || l.contains("getty images") || l.contains("rex features") ||
             // HuffPost gotchas
             l == "advertisement" || l.contains("loadingerror loading") ||
             l.contains("doubleclick.net is blocked") ||
@@ -615,7 +616,7 @@ object ArticleFetcher {
                     webView.loadUrl(url)
                 }
             }
-        }?.let { sanitise(it) }?.takeIf { it.length >= 40 }
+        }?.let { cleanBody(it) }?.takeIf { it.length >= 40 }
     }
 
     // JS that returns the longest article container's innerText using the same
