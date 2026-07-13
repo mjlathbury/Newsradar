@@ -10,11 +10,13 @@ import org.jsoup.parser.Parser
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 
 /**
@@ -25,6 +27,11 @@ class RssFetcher {
 
     private val parser = RssParserBuilder(SHARED_CLIENT, StandardCharsets.UTF_8).build()
 
+    // Per-outlet budget for the whole fetch (primary + Jsoup fallback). Caps the
+    // refresh at this regardless of any single slow/outage outlet, so one bad
+    // source can't stall the entire batch (awaitAll waits for the slowest).
+    private val OUTLET_TIMEOUT_MS = 10_000L
+
     suspend fun fetchAll(enabledOutletIds: Set<String>): List<Article> = coroutineScope {
         val outlets = Outlets.ALL.filter { it.id in enabledOutletIds }
         val now = System.currentTimeMillis()
@@ -32,43 +39,48 @@ class RssFetcher {
 
         val jobs = outlets.map { outlet ->
             async(Dispatchers.IO) {
-                var usedFallback = false
-                val articles = runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
-                    // A CancellationException just means this sync was superseded by
-                    // another (e.g. init + onResume both kicked off a refresh) — it is
-                    // NOT a real feed failure, so don't log it as one. Only genuine errors.
-                    if (e is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
-                    // prof18 can choke on tiny namespace/entity violations that a
-                    // server-side probe ignores (or a CDN serves a 403 to its default
-                    // UA). This is an expected transition, NOT a crash — fail over to
-                    // a direct Jsoup RSS parse before giving up on the outlet entirely.
-                    usedFallback = true
-                    runCatching { fetchOutletFallback(outlet, now) }.getOrElse { e2 ->
-                        // A cancellation while trying the fallback is benign — return
-                        // empty rather than logging it as a (spurious) feed failure.
-                        if (e2 is kotlinx.coroutines.CancellationException) {
-                            emptyList()
-                        } else {
-                            com.newsradar.app.CrashLogger.record(
-                                RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e2)
-                            )
-                            emptyList()
+                // Bound each outlet independently: a slow/outage outlet must not
+                // stall the whole batch (awaitAll waits for the slowest). On budget
+                // hit we contribute nothing and the rest of the feed proceeds.
+                withTimeoutOrNull(OUTLET_TIMEOUT_MS) {
+                    var usedFallback = false
+                    val articles = runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
+                        // A CancellationException just means this sync was superseded by
+                        // another (e.g. init + onResume both kicked off a refresh) — it is
+                        // NOT a real feed failure, so don't log it as one. Only genuine errors.
+                        if (e is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
+                        // prof18 can choke on tiny namespace/entity violations that a
+                        // server-side probe ignores (or a CDN serves a 403 to its default
+                        // UA). This is an expected transition, NOT a crash — fail over to
+                        // a direct Jsoup RSS parse before giving up on the outlet entirely.
+                        usedFallback = true
+                        runCatching { fetchOutletFallback(outlet, now) }.getOrElse { e2 ->
+                            // A cancellation while trying the fallback is benign — return
+                            // empty rather than logging it as a (spurious) feed failure.
+                            if (e2 is kotlinx.coroutines.CancellationException) {
+                                emptyList()
+                            } else {
+                                com.newsradar.app.CrashLogger.record(
+                                    RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e2)
+                                )
+                                emptyList()
+                            }
                         }
                     }
-                }
-                val imgCount = articles.count { !it.imageUrl.isNullOrBlank() }
-                val sample = articles.firstNotNullOfOrNull { it.imageUrl }
-                com.newsradar.app.CrashLogger.fetch(
-                    outletId = outlet.id,
-                    path = if (usedFallback) "jsoup-fallback" else "prof18",
-                    itemCount = articles.size,
-                    imageCount = imgCount,
-                    sampleImage = sample
-                )
-                if (articles.isEmpty()) {
-                    com.newsradar.app.CrashLogger.warn("outlet '${outlet.id}' returned 0 items")
-                }
-                articles
+                    val imgCount = articles.count { !it.imageUrl.isNullOrBlank() }
+                    val sample = articles.firstNotNullOfOrNull { it.imageUrl }
+                    com.newsradar.app.CrashLogger.fetch(
+                        outletId = outlet.id,
+                        path = if (usedFallback) "jsoup-fallback" else "prof18",
+                        itemCount = articles.size,
+                        imageCount = imgCount,
+                        sampleImage = sample
+                    )
+                    if (articles.isEmpty()) {
+                        com.newsradar.app.CrashLogger.warn("outlet '${outlet.id}' returned 0 items")
+                    }
+                    articles
+                } ?: emptyList() // timeout -> contribute nothing, batch proceeds
             }
         }
         val all = jobs.awaitAll().flatten()
@@ -122,7 +134,7 @@ class RssFetcher {
         withContext(Dispatchers.IO) {
             val doc = Jsoup.connect(outlet.feedUrl)
                 .userAgent("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-                .timeout(15000)
+                .timeout(8000)
                 .parser(Parser.xmlParser())
                 .get()
             doc.select("item").mapNotNull { el ->
@@ -240,6 +252,8 @@ class RssFetcher {
         // browser User-Agent so CDNs (Metro) stop 403-ing the RSS request.
         private val SHARED_CLIENT by lazy {
             OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
                 .addInterceptor { chain ->
                     chain.proceed(
                         chain.request().newBuilder()

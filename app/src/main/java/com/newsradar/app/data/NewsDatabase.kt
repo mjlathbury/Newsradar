@@ -6,17 +6,17 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-
 @Database(
     entities = [
         Article::class, KeywordWeight::class, OutletState::class,
         EntityAffinity::class, ArticleEntity::class, ExplicitDislike::class,
         ReadHistory::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class NewsDatabase : RoomDatabase() {
+
     abstract fun newsDao(): NewsDao
 
     companion object {
@@ -52,6 +52,19 @@ abstract class NewsDatabase : RoomDatabase() {
             }
         }
 
+        /** Additive migration 6 -> 7: index the feed filter columns so the
+         *  per-page feed query (rating != RED AND outletId IN (...) AND
+         *  publishedAt >= ?) and the exploration pool don't full-scan + re-sort
+         *  the whole articles table on every page load / scroll. */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS index_articles_feed " +
+                    "ON articles(rating, outletId, publishedAt)"
+                )
+            }
+        }
+
         fun get(context: Context): NewsDatabase =
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
@@ -59,7 +72,7 @@ abstract class NewsDatabase : RoomDatabase() {
                     NewsDatabase::class.java,
                     "newsradar.db"
                 ).fallbackToDestructiveMigration()
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6).build().also { INSTANCE = it }
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7).build().also { INSTANCE = it }
             }
     }
 }

@@ -75,6 +75,13 @@ object EntityExtractor {
         ).forEach { put(it.lowercase(), "EVENT") }
     }
 
+    // Precompiled lexicon entries (regex built ONCE at object-init, not per article)
+    // so a refresh over ~100 new articles doesn't recompile ~10k Regex objects.
+    private data class LexEntry(val regex: Regex, val form: String, val type: String)
+    private val LEXICON_ENTRIES: List<LexEntry> = LEXICON.map { (form, type) ->
+        LexEntry(Regex("(?i)\\b${Regex.escape(form)}\\b"), form, type)
+    }
+
     /** Extract entities from a title + summary. Pure, deterministic, offline. */
     fun extract(title: String, summary: String): List<ExtractedEntity> {
         val text = "$title . $summary"
@@ -82,10 +89,10 @@ object EntityExtractor {
 
         // 1. Lexicon (case-insensitive, multi-word safe) — matched on WORD BOUNDARIES
         //    so short forms ("eu", "un", "who", "x") don't fire inside larger words.
-        for ((form, type) in LEXICON) {
-            val rx = Regex("(?i)\\b${Regex.escape(form)}\\b")
-            if (rx.containsMatchIn(text)) {
-                found.add(ExtractedEntity(form, type, normalise(form)))
+        //    Uses precompiled regexes (built once) — no per-article recompile.
+        for (e in LEXICON_ENTRIES) {
+            if (e.regex.containsMatchIn(text)) {
+                found.add(ExtractedEntity(e.form, e.type, normalise(e.form)))
             }
         }
 

@@ -8,9 +8,14 @@ import com.newsradar.app.engine.Tokeniser
 import com.newsradar.app.engine.TopicTaxonomy
 import com.newsradar.app.rss.ArticleFetcher
 import com.newsradar.app.rss.RssFetcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Single source of truth: coordinates RSS fetching, the DB, and the recommender.
@@ -124,10 +129,11 @@ class NewsRepository private constructor(context: Context) {
                 // of the whole table — the main CPU saving vs. re-scoring all 600+.
                 recommender.rescoreAll(newArticles.map { it.id }.toSet())
             }
-            // Preload reader bodies for the new articles (best-effort, background).
-            // Now the in-app reader shows instantly + offline instead of doing a
-            // live fetch on every open (which fails for WAF/consent-walled outlets).
-            preloadBodies(newArticles)
+            // Preload reader bodies for the new articles — FIRE-AND-FORGET, off the
+            // critical path. The feed returns immediately (instant initial load /
+            // refresh) while bodies cache in the background; the reader shows the
+            // live-fetch fallback for any article not yet preloaded.
+            CoroutineScope(Dispatchers.IO).launch { preloadBodies(newArticles) }
         }
         val weekAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
         dao.pruneOld(weekAgo)
@@ -220,19 +226,25 @@ class NewsRepository private constructor(context: Context) {
      * Background body preload: extract + cache reader bodies for newly-fetched
      * articles so the in-app reader works instantly + offline, instead of doing a
      * live network fetch on every open (which fails for WAF/consent-walled outlets
-     * and after a refresh-all burst). Bounded + best-effort: failures are ignored,
-     * the article simply stays text-less until the user opens it (live fallback).
+     * and after a refresh-all burst). Runs with BOUNDED parallelism + a short
+     * per-article timeout so a slow/outage outlet can't serially stall the whole
+     * refresh — a batch of N articles finishes in ~one article's time, not N.
+     * Best-effort: failures are ignored, the article stays text-less until opened.
      */
-    private suspend fun preloadBodies(articles: List<Article>) = withContext(Dispatchers.IO) {
-        for (a in articles) {
-            if (a.articleBody != null) continue
-            runCatching {
-                val body = ArticleFetcher.fetchText(a.link, null)
-                if (!body.isNullOrBlank() && body.length >= MIN_READER_LEN) {
-                    cacheArticleBody(a.id, body)
+    private suspend fun preloadBodies(articles: List<Article>) = withContext(Dispatchers.IO.limitedParallelism(6)) {
+        articles.map { a ->
+            async {
+                if (a.articleBody != null) return@async
+                runCatching {
+                    val body = withTimeoutOrNull(8_000) {
+                        ArticleFetcher.fetchText(a.link, null)
+                    }
+                    if (!body.isNullOrBlank() && body.length >= MIN_READER_LEN) {
+                        cacheArticleBody(a.id, body)
+                    }
                 }
             }
-        }
+        }.awaitAll()
     }
 
     suspend fun rate(article: Article, rating: Rating) {
