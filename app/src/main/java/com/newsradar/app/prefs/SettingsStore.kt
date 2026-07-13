@@ -20,6 +20,10 @@ enum class RatingDisplay { FULL, COLOUR, NONE }
 /** Available colour palettes the user can cycle through. */
 enum class ColorScheme { BLUE, TEAL, PURPLE, SUNSET, FOREST, MONO }
 
+/** Reader typography: font family and text size. */
+enum class ReaderFont { SYSTEM, SERIF, SANS, MONO }
+enum class ReaderSize { S, M, L, XL }
+
 class SettingsStore(private val context: Context) {
 
     private val THEME = stringPreferencesKey("theme_mode")
@@ -35,12 +39,14 @@ class SettingsStore(private val context: Context) {
     private val DISLIKE_INTERESTS = stringPreferencesKey("dislike_interests")
     private val SHOW_DATE_BAR = booleanPreferencesKey("show_date_bar")
     private val SHOW_SUN = booleanPreferencesKey("show_sun")
+    private val READER_FONT = stringPreferencesKey("reader_font")
+    private val READER_SIZE = stringPreferencesKey("reader_size")
 
     val themeMode: Flow<ThemeMode> = context.dataStore.data.map {
         ThemeMode.valueOf(it[THEME] ?: ThemeMode.SYSTEM.name)
     }
     val colorScheme: Flow<ColorScheme> = context.dataStore.data.map {
-        ColorScheme.valueOf(it[SCHEME] ?: ColorScheme.BLUE.name)
+        ColorScheme.valueOf(it[SCHEME] ?: ColorScheme.TEAL.name)
     }
     val fetchHour: Flow<Int> = context.dataStore.data.map { it[FETCH_HOUR] ?: 7 }
 
@@ -77,6 +83,19 @@ class SettingsStore(private val context: Context) {
     /** Show sunrise/sunset under the expanded weather. */
     val showSun: Flow<Boolean> =
         context.dataStore.data.map { it[SHOW_SUN] ?: true }
+
+    /** Reader font family; defaults to Serif for comfortable long-form reading. */
+    val readerFont: Flow<ReaderFont> =
+        context.dataStore.data.map {
+            try { ReaderFont.valueOf(it[READER_FONT] ?: ReaderFont.SERIF.name) }
+            catch (e: Exception) { ReaderFont.SERIF }
+        }
+    /** Reader text size; defaults to Medium. */
+    val readerSize: Flow<ReaderSize> =
+        context.dataStore.data.map {
+            try { ReaderSize.valueOf(it[READER_SIZE] ?: ReaderSize.M.name) }
+            catch (e: Exception) { ReaderSize.M }
+        }
 
     suspend fun setThemeMode(mode: ThemeMode) =
         context.dataStore.edit { it[THEME] = mode.name }
@@ -116,4 +135,10 @@ class SettingsStore(private val context: Context) {
 
     suspend fun setShowSun(enabled: Boolean) =
         context.dataStore.edit { it[SHOW_SUN] = enabled }
+
+    suspend fun setReaderFont(f: ReaderFont) =
+        context.dataStore.edit { it[READER_FONT] = f.name }
+
+    suspend fun setReaderSize(s: ReaderSize) =
+        context.dataStore.edit { it[READER_SIZE] = s.name }
 }

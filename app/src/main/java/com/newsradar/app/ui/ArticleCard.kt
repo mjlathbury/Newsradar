@@ -37,12 +37,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Size
 import com.newsradar.app.data.Article
 import com.newsradar.app.data.Outlets
 import com.newsradar.app.data.Paywall
 import com.newsradar.app.data.Rating
-import com.newsradar.app.ui.MainViewModel.SummaryState
 import com.newsradar.app.prefs.RatingDisplay
 import com.newsradar.app.ui.theme.RatingAmber
 import com.newsradar.app.ui.theme.RatingGreen
@@ -75,8 +78,7 @@ fun ArticleCard(
     article: Article,
     reasons: List<String>,
     showImages: Boolean = true,
-    summary: SummaryState? = null,
-    onSummary: () -> Unit = {},
+    onRead: () -> Unit = {},
     ratingDisplay: RatingDisplay = RatingDisplay.FULL,
     onOpen: (String) -> Unit,
     onRate: (Rating) -> Unit
@@ -95,7 +97,11 @@ fun ArticleCard(
         Column {
             if (showImages && !article.imageUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = article.imageUrl,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(article.imageUrl)
+                        .size(Size(1080, 1080))
+                        .crossfade(true)
+                        .build(),
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -165,19 +171,18 @@ fun ArticleCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ModernPill(
-                        text = "Full article",
-                        icon = Icons.Filled.OpenInBrowser,
+                        text = "Read",
+                        icon = Icons.AutoMirrored.Filled.Article,
                         filled = true,
                         modifier = Modifier.weight(1f),
-                        onClick = { onOpen(article.link) }
+                        onClick = onRead
                     )
                     ModernPill(
-                        text = "Brief Summary",
-                        icon = Icons.AutoMirrored.Filled.Article,
+                        text = "Full article",
+                        icon = Icons.Filled.OpenInBrowser,
                         filled = false,
-                        loading = summary?.loading == true,
                         modifier = Modifier.weight(1f),
-                        onClick = onSummary
+                        onClick = { onOpen(article.link) }
                     )
                 }
                 Spacer(Modifier.height(12.dp))

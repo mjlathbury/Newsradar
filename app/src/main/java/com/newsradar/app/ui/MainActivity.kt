@@ -49,10 +49,17 @@ class MainActivity : ComponentActivity() {
                 val nav = rememberNavController()
                 NavHost(navController = nav, startDestination = "feed") {
                     composable("feed") {
-                        FeedScreen(vm = vm, onOpenSettings = { nav.navigate("settings") })
+                        FeedScreen(
+                            vm = vm,
+                            onOpenSettings = { nav.navigate("settings") },
+                            onOpenHistory = { nav.navigate("history") }
+                        )
                     }
                     composable("settings") {
                         SettingsScreen(vm = vm, onBack = { nav.popBackStack() })
+                    }
+                    composable("history") {
+                        HistoryScreen(vm = vm, onBack = { nav.popBackStack() })
                     }
                 }
             }

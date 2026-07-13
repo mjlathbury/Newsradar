@@ -81,5 +81,12 @@ dependencies {
     // Android WebView (in-app reader overlay)
     implementation("androidx.webkit:webkit:1.11.0")
 
+    // Chrome Custom Tabs (Read-on-Web fallback for gated/failed extraction)
+    implementation("androidx.browser:browser:1.8.0")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Local JVM unit tests (run via ./gradlew testDebugUnitTest — no device needed).
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }

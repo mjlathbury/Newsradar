@@ -45,4 +45,16 @@ object Outlets {
     )
 
     fun byId(id: String): Outlet? = ALL.firstOrNull { it.id == id }
+
+    /** Outlets whose full article is consent-gated / body-less on-device: extraction
+     *  reliably comes back too thin, so the reader routes straight to a Chrome
+     *  Custom Tab ("Read on Web") instead of showing a broken stub. Revisit as AMP
+     *  extraction improves — drop an id here if it starts extracting cleanly.
+     *  NOTE: mail + mirror were removed (2026-07-13) — a live HTTP probe proved
+     *  both serve full server-rendered bodies under a normal mobile UA (Mirror
+     *  JSON-LD articleBody = ~1.4k chars; Mail body in .article-text), so the
+     *  native reader extracts them fine. dailyrecord remains gated (unprobed CMS). */
+    private val GATED = setOf("dailyrecord")
+
+    fun isGated(id: String): Boolean = id in GATED
 }

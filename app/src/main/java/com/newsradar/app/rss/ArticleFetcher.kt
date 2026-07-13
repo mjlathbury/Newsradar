@@ -4,6 +4,7 @@ import android.content.Context
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.newsradar.app.CrashLogger
+import com.newsradar.app.util.UrlUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -49,6 +50,17 @@ object ArticleFetcher {
         "[class*=social]", "[class*=share]", "[class*=meta]", "[class*=byline]",
         "[class*=cookie]", "[class*=banner]", "[class*=newsletter-signup]",
         "[class*=taboola]", "[class*=outbrain]", "[class*=zn-player]",
+        // Guardian + generic page-tail / promo blocks that leak past <main>
+        "[class*=most-viewed]", "[class*=most-read]", "[class*=mostViewed]",
+        "[class*=mostRead]", "[class*=related-content]", "[class*=related-stories]",
+        "[class*=footer]", "[class*=Footer]", "[id*=footer]",
+        "[class*=privacy]", "[class*=PrivacyManager]", "[class*=cookie-notice]",
+        "[class*=site-message]", "[class*=contributions]", "[class*=signin]",
+        // BBC: related-links + topic chips + "Follow … news" CTA sit inside <article>
+        "div[data-component=links-block]", "div[data-component=tag-list-block]",
+        "div[data-component=follow-block]", "p[id^=follow-]",
+        // Independent: taboola/teads in-article promos + newsletter aside
+        "[class*=teads]", "aside.newsletter-component",
         "figure figcaption", ".caption", ".credit"
     )
 
@@ -59,16 +71,20 @@ object ArticleFetcher {
     //   - Mirror: body lives in the React class [class*=ArticleBody]
     //     ([class*=article-body] also matches); the bare <article> wrapper is too
     //     broad and pulls nav/ads, so it's a low-priority fallback only.
-    //   - Consent cookies / AMP are INERT for both (proven empirically) — selectors
-    //     are the whole fix, on a server-rendered page.
+    //   - Guardian: body lives in [data-gu-name=article-body]; the bare <main>
+    //     wrapper also contains the "Most viewed" + privacy footer tail, so it
+    //     MUST be a low-priority fallback, not an early match.
+    //   - Consent cookies / AMP are INERT for DM/Mirror (proven empirically).
     private val CONTAINER_SELECTORS = arrayOf(
         ".article-text",                 // Daily Mail (primary)
         "[itemprop=articleBody]",        // Daily Mail fallback
         "[class*=ArticleBody]",          // Mirror (React class) — primary
         "[class*=article-body]",         // Mirror generic
+        "[data-gu-name=article-body]",      // Guardian article body (precise)
+        "div.article__content__inner",     // Metro article body (precise; bare <article> leaks promos)
         ".article-body", ".story-body", ".article__body", ".js-article-body",
-        "main", ".content", ".post-content", ".entry-content",
-        "article"                        // last resort (too broad on DM/Mirror)
+        ".content", ".post-content", ".entry-content",
+        "main", "article"               // last resort (too broad — pulls tail)
     )
 
     // Real mobile UA — Daily Mail's Akamai edge returns HTTP 403 to missing/bot UAs,
@@ -92,19 +108,20 @@ object ArticleFetcher {
                     .maxBodySize(0)
                     .get()
 
-                val body = extractFromDoc(doc, cleanLink)
+                val body = extractFromDoc(doc, cleanLink)?.let { sanitise(it) }
                 if (body != null && body.length >= 120) {
+                    CrashLogger.article(cleanLink, body.length, ok = true)
                     body.take(8000)
                 } else {
-                    // Nothing usable from the HTTP path — try the WebView as a last
-                    // resort (genuinely JS-rendered pages), then null.
-                    CrashLogger.record(
-                        RuntimeException(
-                            "ArticleFetcher: HTTP path too short for $cleanLink " +
-                                "(len=${body?.length ?: 0}); trying WebView"
-                        )
+                    // HTTP path returned something too short to be the article — this
+                    // is an expected transition. Try AMP (clean, JS-light) BEFORE the
+                    // expensive/often-blocked WebView fallback.
+                    val snippet = doc.body()?.text()?.take(200) ?: ""
+                    CrashLogger.article(
+                        cleanLink, body?.length ?: 0, ok = false,
+                        snippet = "short-HTTP; $snippet"
                     )
-                    webViewFallback(cleanLink, context) ?: body
+                    tryAmp(cleanLink) ?: webViewFallback(cleanLink, context) ?: body
                 }
             } catch (e: Exception) {
                 CrashLogger.record(
@@ -114,13 +131,74 @@ object ArticleFetcher {
             }
         }
 
+    /**
+     * Lightweight hero-image resolver used by the reader when the feed-supplied
+     * imageUrl is missing/blank (e.g. a stale cached row, or a feed that shipped no
+     * image). Pulls the page's Open Graph image, which is reliable across all our
+     * outlets. Returns null if it can't be found.
+     */
+    suspend fun fetchHeroImage(link: String): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val doc = Jsoup.connect(normaliseLink(link))
+                .userAgent(MOBILE_UA)
+                .header("Accept-Language", "en-GB,en;q=0.9")
+                .followRedirects(true)
+                .timeout(20000)
+                .maxBodySize(0)
+                .get()
+            doc.selectFirst("meta[property=og:image]")
+                ?.attr("content")
+                ?.takeIf { it.startsWith("http") }
+                ?.let { cleanImageUrl(it) }
+        }.getOrNull()
+    }
+
+    /**
+     * AMP fallback. Google requires AMP pages to be fast and immediately readable,
+     * so publishers usually strip the heavy consent/paywall JS from them — which
+     * makes the body trivially extractable by our normal selectors + Readability.
+     * Tries the two common AMP URL shapes; returns null if neither yields enough.
+     */
+    private suspend fun tryAmp(cleanLink: String): String? = withContext(Dispatchers.IO) {
+        val candidates = listOf(
+            cleanLink.trimEnd('/') + "/amp/",
+            if (cleanLink.contains("?")) "$cleanLink&amp=1" else "$cleanLink?amp=1"
+        )
+        for (amp in candidates) {
+            val recovered = runCatching {
+                val doc = Jsoup.connect(amp)
+                    .userAgent(MOBILE_UA)
+                    .header("Accept-Language", "en-GB,en;q=0.9")
+                    .followRedirects(true)
+                    .timeout(20000)
+                    .maxBodySize(0)
+                    .get()
+                val b = extractFromDoc(doc, amp)?.let { sanitise(it) }
+                if (b != null && b.length >= 300) {
+                    CrashLogger.article(amp, b.length, ok = true, snippet = "amp")
+                    b.take(8000)
+                } else null
+            }.getOrNull()
+            if (recovered != null) return@withContext recovered
+        }
+        null
+    }
+
     /** Normalise a feed link: strip tracking query params
      *  geo-gated .co.uk host to the global .com (the .co.uk 301-redirects to .com
      *  anyway, and .com is the host that serves the full body on-device; .co.uk is
      *  the one that returns the bodyless/403 variant). */
-    private fun normaliseLink(link: String): String =
-        link.substringBefore("?")
-            .replace("dailymail.co.uk", "dailymail.com")
+    private fun normaliseLink(link: String): String = UrlUtils.normaliseLink(link)
+
+    /**
+     * Strip image-resizing query params so we request the full-size asset rather
+     * than a thumbnail. Guardian's CDN (i.guim.co.uk) requires the FULL original
+     * query string (the `s` param is a per-URL signature validated against the
+     * entire query), so those URLs are kept exactly as served. Other outlets use
+     * `?width=` / `auto=webp` style params we can safely drop.
+     */
+    private fun cleanImageUrl(url: String?): String? =
+        if (url.isNullOrBlank()) null else UrlUtils.cleanImageUrl(url)
 
     /**
      * Extract readable article text from an already-fetched [Document], trying
@@ -130,16 +208,19 @@ object ArticleFetcher {
         // 1. Strip ad / promo / related / footer noise first.
         for (sel in JUNK_SELECTORS) doc.select(sel).remove()
 
-        // 2. Per-site / generic container selectors — take the largest text block.
-        var best = ""
+        // 2. Per-site / generic container selectors — take the largest text block,
+        //    remembering the ELEMENT (not just its flat text) so we can serialize it
+        //    into paragraph-structured blocks for the reader view.
+        var bestEl: org.jsoup.nodes.Element? = null
+        var bestLen = 0
         for (sel in CONTAINER_SELECTORS) {
             for (el in doc.select(sel)) {
                 val t = el.text().trim()
-                if (t.length > best.length) best = t
+                if (t.length > bestLen) { bestLen = t.length; bestEl = el }
             }
-            if (best.length >= 600) return cleanBody(best) // good enough, stop early
+            if (bestLen >= 600 && bestEl != null) return blocksFrom(bestEl!!) // good enough
         }
-        if (best.isNotBlank()) return cleanBody(best)
+        if (bestEl != null && bestLen > 0) return blocksFrom(bestEl!!)
 
         // 3. JSON-LD articleBody / description (opportunistically; DM ships it empty).
         val jsonLd = doc.select("script[type=application/ld+json]").mapNotNull { el ->
@@ -157,21 +238,142 @@ object ArticleFetcher {
         }
     }
 
+    /**
+     * Serialize the chosen article container into clean paragraph blocks so the
+     * reader can render real paragraph breaks and subheadings. Drops figures,
+     * captions and pull-quotes. Emits "## " before subheadings and "• " before
+     * list items; paragraphs are separated by a blank line. Applies the same
+     * boilerplate line filters as [cleanBody].
+     */
+    private fun blocksFrom(container: org.jsoup.nodes.Element): String? {
+        container.select("figure, figcaption, blockquote, aside").remove()
+        // Drop dead/garbage cross-promo anchors (e.g. HuffPost's href="/v" WMO
+        // link, or ?origin=*-recirc tracking anchors) so their link-text can't
+        // leak into the prose as a plausible sentence.
+        for (a in container.select("a")) {
+            val href = a.attr("href").lowercase()
+            if (href.endsWith("/v") || href.contains("origin=") && href.contains("recirc")) {
+                a.remove()
+            }
+        }
+        val out = StringBuilder()
+        for (el in container.select("p, h2, h3, li")) {
+            val t = el.text().trim()
+            if (t.length < 2) continue
+            if (isBoilerplate(t)) continue
+            when (el.tagName()) {
+                "h2", "h3" -> out.append("## ").append(t).append("\n\n")
+                "li" -> out.append("• ").append(t).append("\n\n")
+                else -> out.append(t).append("\n\n")
+            }
+        }
+        val result = out.toString()
+            .replace(Regex("\\n{3,}"), "\n\n")
+            .trim()
+        // If block extraction came up thin (e.g. a container with no <p> tags), fall
+        // back to the flat text so we still return something readable.
+        return result.takeIf { it.length >= 40 } ?: cleanBody(container.text())
+    }
+
+    /** True if a line is consent/cookie/copyright/footer/promo boilerplate that
+     *  slips through. Covers Guardian's leaked page-tail fragments plus the
+     *  per-outlet inline gotchas found by manual HTML analysis:
+     *   - BBC: "Follow … news on" social CTA (a bare <p> inside <article>)
+     *   - Metro: newsletter signup CTA ("Get analysis of the latest stories…")
+     *   - Sky: "Read more:" / "Read more from Sky News:" inline cross-promo,
+     *          "Why you can trust Sky News", app-install promo, "Related Topics"
+     *   - HuffPost: literal "Advertisement" paragraph, "LOADINGERROR LOADING",
+     *     doubleclick-block error text, share/correction footer lines. */
+    private fun isBoilerplate(line: String): Boolean {
+        val l = line.lowercase()
+        return l.contains("cookie") || l.contains("consent") ||
+            l.contains("we and our partners") || l.contains("privacy policy") ||
+            l.contains("privacy manager") || l.contains("do not sell") ||
+            l.contains("california resident") || l.contains("most viewed") ||
+            l.contains("most read") || l == "closer" || l == "tpc test" ||
+            // BBC follow CTA
+            l.contains("follow") && l.contains("news on") ||
+            // Metro newsletter CTA (classless <p> inside body container)
+            l.contains("start your day informed") ||
+            l.contains("metro's news updates newsletter") ||
+            l.contains("get breaking news alerts") || l.contains("sign up for all of the latest stories") ||
+            // HuffPost "Related" cross-promo block + topic chips
+            l == "related" || l.contains("related topics") ||
+            l.contains("more in ") && l.contains("huffpost") ||
+            l.startsWith("read this next") || l.startsWith("more from huffpost") ||
+            // Sky inline cross-promo + trust/app promos
+            l.startsWith("read more:") || l.startsWith("read more from sky news:") ||
+            l.contains("why you can trust") || l.contains("install the sky news app") ||
+            l.contains("be the first to get breaking news") ||
+            l.contains("see more sky news in google") || l.contains("related topics") ||
+            l.startsWith("image:") ||
+            // HuffPost gotchas
+            l == "advertisement" || l.contains("loadingerror loading") ||
+            l.contains("doubleclick.net is blocked") ||
+            l.contains("this page has been blocked by an extension") ||
+            l.contains("err_blocked_by_client") || l.contains("go to homepage") ||
+            l.contains("open comments") || l.startsWith("share on") ||
+            l.contains("email this article") || l.contains("suggest a correction") ||
+            l.contains("submit a tip") ||
+            line.contains("©")
+    }
+
     /** Light cleanup of extracted body text: collapse whitespace, drop obvious
      *  consent/boilerplate lines that slip through. */
     private fun cleanBody(raw: String): String? {
         return raw.split("\n")
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .filter { !it.contains("cookie", ignoreCase = true) }
-            .filter { !it.contains("consent", ignoreCase = true) }
-            .filter { !it.contains("we and our partners", ignoreCase = true) }
-            .filter { !it.contains("privacy policy", ignoreCase = true) }
-            .filter { !it.contains("©", ignoreCase = true) }
+            .filterNot { isBoilerplate(it) }
             .joinToString("\n\n")
             .replace(Regex("\\n{3,}"), "\n\n")
             .trim()
             .takeIf { it.length >= 40 }
+    }
+
+    /**
+     * Final sanitise pass on the already-assembled article text. Runs ONLY on the
+     * joined String after Jsoup / Readability / WebView extraction — never re-parses
+     * HTML and never touches the Document. Pure and bounded: a linear entity map
+     * (no regex, no backtracking), one possessive-free tag-strip regex with a fixed
+     * upper bound, then line/blank-line normalisation.
+     */
+    private fun sanitise(raw: String): String {
+        // (a) Unescape the common HTML entities. Linear .replace — no regex.
+        //     &amp; is done first so double-escaped forms (&amp;quot;) decode correctly.
+        val unescaped = raw
+            .replace("&amp;", "&")
+            .replace("&#39;", "'")
+            .replace("&apos;", "'")
+            .replace("&quot;", "\"")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&nbsp;", " ")
+            .replace("&#160;", " ")
+            .replace("&ndash;", "–")
+            .replace("&mdash;", "—")
+            .replace("&hellip;", "…")
+            .replace("&rsquo;", "’")
+            .replace("&lsquo;", "‘")
+            .replace("&ldquo;", "“")
+            .replace("&rdquo;", "”")
+            .replace("&euro;", "€")
+            .replace("&pound;", "£")
+
+        // (b) Strip any residual tag-like tokens with a safe, non-backtracking regex.
+        //     < or </, an opening letter, up to 100 tag-name chars, optional spaces,
+        //     optional self-close, then >. The {0,100} bound guarantees linear time.
+        val noTags = unescaped.replace(
+            Regex("</?[A-Za-z][A-Za-z0-9\\-_:]{0,100}\\s*/?>"), ""
+        )
+
+        // (d) Trim trailing whitespace on every line (tabs/spaces/CR, not newlines).
+        val trimmed = noTags.lineSequence()
+            .map { it.replace(Regex("[ \\t\\r]+$"), "") }
+            .joinToString("\n")
+
+        // (c) Collapse 3+ newlines down to a single blank line (two newlines).
+        return trimmed.replace(Regex("\\n{3,}"), "\n\n").trim()
     }
 
     /**
@@ -246,7 +448,7 @@ object ArticleFetcher {
                     webView.loadUrl(url)
                 }
             }
-        }?.takeIf { it.length >= 40 }
+        }?.let { sanitise(it) }?.takeIf { it.length >= 40 }
     }
 
     // JS that returns the longest article container's innerText using the same

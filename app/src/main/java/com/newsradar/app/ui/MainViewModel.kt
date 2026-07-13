@@ -3,29 +3,31 @@ package com.newsradar.app.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.newsradar.app.engine.Summarizer
 import com.newsradar.app.rss.ArticleFetcher
 import com.newsradar.app.data.Article
 import com.newsradar.app.data.NewsRepository
 import com.newsradar.app.data.Rating
+import com.newsradar.app.data.ReadHistory
 import com.newsradar.app.prefs.ColorScheme
 import com.newsradar.app.prefs.RatingDisplay
+import com.newsradar.app.prefs.ReaderFont
+import com.newsradar.app.prefs.ReaderSize
 import com.newsradar.app.prefs.SettingsStore
 import com.newsradar.app.prefs.ThemeMode
 import com.newsradar.app.weather.WeatherData
 import com.newsradar.app.weather.WeatherProvider
 import com.newsradar.app.weather.WeatherRepository
+import com.newsradar.app.util.UrlUtils
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.TextStyle
@@ -66,64 +68,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _greeting = MutableStateFlow(GreetingState())
     val greeting: StateFlow<GreetingState> = _greeting.asStateFlow()
 
-    /** State of an on-demand 60s summary: idle, loading, done (text), or failed. */
-    data class SummaryState(
+    /** State of an on-demand reader body: idle, loading, done (text), or too-thin. */
+    data class ReaderState(
         val loading: Boolean = false,
-        val text: String? = null,
+        /** Paragraph-structured body ("\n\n" blocks, "## " subheadings, "• " bullets). */
+        val body: String? = null,
+        /** True when extraction was too thin — the UI offers "Read on Web" (CCT). */
         val error: Boolean = false,
-        /** True only when [text] came from a successful full-article fetch (not the
-         *  RSS blurb fallback). A blurb fallback is never cached-sticky — it must
-         *  keep retrying so a transient fetch failure doesn't stick a short blurb. */
-        val fetched: Boolean = false,
-        /** Consecutive failed fetches for this article. Capped so a permanently
-         *  dead link (e.g. a 410 tracking URL) doesn't spam fetchText on every open. */
+        /** Consecutive failed fetches for this article, capped so a dead link
+         *  (e.g. a 410 tracking URL) doesn't spam fetchText on every open. */
         val failedAttempts: Int = 0
     )
 
     /** Max fetch retries per article per session before we stop trying. */
-    private val MAX_SUMMARY_RETRIES = 3
+    private val MAX_READER_RETRIES = 3
 
-    private val _summaries = MutableStateFlow<Map<String, SummaryState>>(emptyMap())
-    val summaries: StateFlow<Map<String, SummaryState>> = _summaries.asStateFlow()
+    /** Minimum body length to consider a reader extraction successful. */
+    private val MIN_READER_LEN = 300
 
-    /** Fetch + summarize an article's body on demand (only when the user asks). */
-    fun requestSummary(article: Article) {
-        val existing = _summaries.value[article.id]
-        // Skip if loading, or we already have a *fetched* summary, or we've already
-        // retried enough times on a dead link (avoid spamming fetchText forever).
+    private val _readers = MutableStateFlow<Map<String, ReaderState>>(emptyMap())
+    val readers: StateFlow<Map<String, ReaderState>> = _readers.asStateFlow()
+
+    /** Fetch (or load cached) the full article body for the reader, on demand. */
+    fun requestArticle(article: Article) {
+        val existing = _readers.value[article.id]
+        // Skip if already loading, already have a body, or retried enough on a dead link.
         if (existing?.loading == true ||
-            (existing?.text != null && existing.fetched) ||
-            existing?.failedAttempts ?: 0 >= MAX_SUMMARY_RETRIES
+            existing?.body != null ||
+            (existing?.failedAttempts ?: 0) >= MAX_READER_RETRIES
         ) return
 
+        // Offline cache hit: show the previously-extracted body immediately.
+        val cached = article.articleBody
+        if (!cached.isNullOrBlank()) {
+            _readers.update { it + (article.id to ReaderState(body = cached)) }
+            return
+        }
+
         viewModelScope.launch {
-            _summaries.update { it + (article.id to SummaryState(loading = true)) }
-            // Always prefer the full article body when we can fetch it — the RSS
-            // blurb is only a short lede, which yields a too-brief summary for
-            // outlets like the Guardian/Mirror. Fall back to the blurb only if the
-            // fetch fails (never show "Couldn't build" when we have text).
-            val blurb = article.summary
-            // fetchText is already main-safe (it switches to Dispatchers.IO
-            // internally) and catches its own network exceptions, returning null
-            // on failure — so no withContext/try-catch wrapper is needed here.
+            _readers.update { it + (article.id to ReaderState(loading = true)) }
+            // fetchText is main-safe (switches to Dispatchers.IO internally) and
+            // catches its own network exceptions, returning null on failure.
             val fetched = ArticleFetcher.fetchText(article.link, getApplication())
-            val body = when {
-                fetched != null && fetched.length > blurb.length -> fetched
-                blurb.isNotBlank() -> blurb
-                else -> fetched
-            }
-            val result = if (body != null && body.isNotBlank()) {
-                val summary = withContext(Dispatchers.Default) { Summarizer.summarize(body) }
-                // Mark as fetched ONLY when the text actually came from the article
-                // body (not the blurb fallback), so failures keep retrying.
-                SummaryState(text = summary, fetched = fetched != null && fetched.length > blurb.length)
+            val result = if (fetched != null && fetched.length >= MIN_READER_LEN) {
+                // Cache for offline reads next time.
+                repo.cacheArticleBody(article.id, fetched)
+                ReaderState(body = fetched)
             } else {
-                // Fetch failed (or both empty): remember the attempt so a permanently
-                // dead link stops retrying after MAX_SUMMARY_RETRIES.
                 val attempts = (existing?.failedAttempts ?: 0) + 1
-                SummaryState(error = true, failedAttempts = attempts)
+                ReaderState(error = true, failedAttempts = attempts)
             }
-            _summaries.update { it + (article.id to result) }
+            _readers.update { it + (article.id to result) }
         }
     }
 
@@ -133,7 +128,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val themeMode: StateFlow<ThemeMode> =
         settings.themeMode.stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.SYSTEM)
     val colorScheme: StateFlow<ColorScheme> =
-        settings.colorScheme.stateIn(viewModelScope, SharingStarted.Eagerly, ColorScheme.BLUE)
+        settings.colorScheme.stateIn(viewModelScope, SharingStarted.Eagerly, ColorScheme.TEAL)
 
     private val _userName = MutableStateFlow("")
     val userName: StateFlow<String> = _userName.asStateFlow()
@@ -156,8 +151,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val showSun: StateFlow<Boolean> =
         settings.showSun.stateIn(viewModelScope, SharingStarted.Eagerly, true)
 
+    val readerFont: StateFlow<ReaderFont> =
+        settings.readerFont.stateIn(viewModelScope, SharingStarted.Eagerly, ReaderFont.SERIF)
+    val readerSize: StateFlow<ReaderSize> =
+        settings.readerSize.stateIn(viewModelScope, SharingStarted.Eagerly, ReaderSize.M)
+
     val outletStates = repo.observeOutletStates()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ---- Read history ----
+    private val _historyQuery = MutableStateFlow("")
+    val historyQuery: StateFlow<String> = _historyQuery.asStateFlow()
+
+    /** Read history, re-queried live as [historyQuery] changes (LIKE search). */
+    val history: StateFlow<List<ReadHistory>> = _historyQuery
+        .flatMapLatest { q -> repo.getHistory(q) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun setHistoryQuery(q: String) { _historyQuery.value = q }
+
+    /** Persist a read article to history (deduped by id, pruned to 100). */
+    fun recordRead(article: Article) {
+        viewModelScope.launch { repo.recordRead(article) }
+    }
 
     /** Last successful feed fetch time, used to throttle onResume auto-refresh. */
     private var lastFetchTime = 0L
@@ -181,7 +197,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Greeting ----
+    /** Toggle to re-enable the welcome popup later. Disabled for now. */
+    private val GREETING_ENABLED = false
+
     fun showGreeting() {
+        if (!GREETING_ENABLED) return
         viewModelScope.launch {
             val name = settings.userName.first()
             val now = LocalTime.now()
@@ -245,6 +265,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     page = 0,
                     canLoadMore = first.size == 5
                 )
+                recoverHeroImages(first)
             }
         }
     }
@@ -262,6 +283,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 page = nextPage,
                 canLoadMore = more.size == 5
             )
+            recoverHeroImages(more)
         }
     }
 
@@ -280,6 +302,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     canLoadMore = first.size == 5
                 )
                 lastFetchTime = System.currentTimeMillis()
+                recoverHeroImages(first)
             } catch (e: Exception) {
                 _feed.value = _feed.value.copy(
                     refreshing = false,
@@ -310,6 +333,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _feed.value = _feed.value.copy(articles = updated)
+        }
+    }
+
+    /**
+     * Guardian's RSS image URLs are UA-pinned signed (?s=) and 401 through Coil.
+     * Recover a working hero by scraping the article page's unsigned og:image,
+     * then persist + patch the in-memory list so the feed CARD shows it right
+     * away (no need to open the reader first). Blank-image items get the same
+     * treatment. Runs concurrently, fire-and-forget per article.
+     */
+    private fun recoverHeroImages(articles: List<Article>) {
+        articles.forEach { a ->
+            val needs = a.imageUrl.isNullOrBlank() || UrlUtils.isSignedImageUrl(a.imageUrl)
+            if (needs) {
+                viewModelScope.launch {
+                    val og = ArticleFetcher.fetchHeroImage(a.link) ?: return@launch
+                    repo.updateArticleImage(a.id, og)
+                    _feed.value = _feed.value.copy(
+                        articles = _feed.value.articles.map {
+                            if (it.id == a.id) it.copy(imageUrl = og) else it
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    /** Persist a corrected hero image (e.g. Guardian's UA-pinned signed feed URL
+     *  replaced by the page's unsigned og:image) back to Room for instant+offline,
+     *  and patch the in-memory feed item so the card repaints without a reload. */
+    fun updateArticleImage(id: String, imageUrl: String) {
+        viewModelScope.launch {
+            repo.updateArticleImage(id, imageUrl)
+            _feed.value = _feed.value.copy(
+                articles = _feed.value.articles.map {
+                    if (it.id == id) it.copy(imageUrl = imageUrl) else it
+                }
+            )
         }
     }
 
@@ -382,4 +443,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setShowSun(enabled: Boolean) = viewModelScope.launch {
         settings.setShowSun(enabled)
     }
+    fun setReaderFont(f: ReaderFont) = viewModelScope.launch { settings.setReaderFont(f) }
+    fun setReaderSize(s: ReaderSize) = viewModelScope.launch { settings.setReaderSize(s) }
 }

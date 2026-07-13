@@ -21,7 +21,22 @@ object Tokeniser {
         "has","have","had","do","does","did","will","would","can","could","should",
         "not","no","yes","so","than","too","very","just","says","said","after","new",
         "uk","news","more","one","two","get","got","who","what","when","where","why",
-        "how","which","about","into","also","been","amid","live","latest"
+        "how","which","about","into","also","been","amid","live","latest",
+        // extra noise tokens that otherwise leak into learned weights / chips
+        "take","taken","takes","taking","short","year","years","don","dont","easy",
+        "easily","declare","declared","declares","make","makes","made","well","will",
+        "want","need","needs","use","used","using","like","likes","liked","many",
+        "much","way","ways","thing","things","people","time","times","day","days",
+        "week","weeks","now","back","still","first","last","next","set","sets","said",
+        "say","saying","could","may","might","must","let","lets","put","puts","go",
+        "goes","going","gone","come","comes","came","see","seen","look","looks",
+        "find","found","give","gave","given","keep","kept","tell","told","ask","asked",
+        "work","works","working","show","shows","shown","call","called","told","end",
+        "ends","part","parts","place","state","states","world","man","men","woman",
+        "women","child","children","home","house","group","area","number","high","low",
+        "big","small","old","young","great","large","long","full","half","per","via",
+        "against","between","through","before","while","without","within","around",
+        "them","there","here","both","each","every","any","all","our","your"
     )
 
     fun tokenise(text: String): List<String> {
@@ -31,6 +46,9 @@ object Tokeniser {
             .filter { it.length in 3..24 && it !in STOP_WORDS && !it.all { c -> c.isDigit() } }
             .map { stem(it) }
     }
+
+    /** True if [w] is a noise/stop word that should never be learned or shown. */
+    fun isStopWord(w: String): Boolean = w in STOP_WORDS
 
     /** Very light stemmer: strips common English suffixes. */
     private fun stem(w: String): String {

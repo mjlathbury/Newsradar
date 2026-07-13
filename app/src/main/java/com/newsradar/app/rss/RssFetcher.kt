@@ -3,9 +3,13 @@ package com.newsradar.app.rss
 import com.newsradar.app.data.Article
 import com.newsradar.app.data.Outlet
 import com.newsradar.app.data.Outlets
+import com.newsradar.app.util.UrlUtils
 import com.prof18.rssparser.RssParserBuilder
 import org.jsoup.Jsoup
 import org.jsoup.parser.Parser
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import java.nio.charset.StandardCharsets
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -19,39 +23,56 @@ import java.security.MessageDigest
  */
 class RssFetcher {
 
-    private val parser = RssParserBuilder().build()
+    private val parser = RssParserBuilder(SHARED_CLIENT, StandardCharsets.UTF_8).build()
 
     suspend fun fetchAll(enabledOutletIds: Set<String>): List<Article> = coroutineScope {
         val outlets = Outlets.ALL.filter { it.id in enabledOutletIds }
         val now = System.currentTimeMillis()
+        com.newsradar.app.CrashLogger.lifecycle("refresh start: ${outlets.size} outlets")
 
         val jobs = outlets.map { outlet ->
             async(Dispatchers.IO) {
-                runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
+                var usedFallback = false
+                val articles = runCatching { fetchOutlet(outlet, now) }.getOrElse { e ->
                     // A CancellationException just means this sync was superseded by
                     // another (e.g. init + onResume both kicked off a refresh) — it is
-                    // NOT a real feed failure, so don't log it as one (it would show up
-                    // as a spurious "feed fetch failed" in Debug while the surviving
-                    // sync still delivers the articles). Only log genuine errors.
+                    // NOT a real feed failure, so don't log it as one. Only genuine errors.
                     if (e is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
                     // prof18 can choke on tiny namespace/entity violations that a
-                    // server-side probe ignores. Log it and fail over to a direct
-                    // Jsoup RSS parse before giving up on the outlet entirely.
-                    com.newsradar.app.CrashLogger.record(
-                        RuntimeException("RssFetcher: prof18 failed for '${outlet.id}', trying Jsoup fallback", e)
-                    )
+                    // server-side probe ignores (or a CDN serves a 403 to its default
+                    // UA). This is an expected transition, NOT a crash — fail over to
+                    // a direct Jsoup RSS parse before giving up on the outlet entirely.
+                    usedFallback = true
                     runCatching { fetchOutletFallback(outlet, now) }.getOrElse { e2 ->
-                        // Similarly, a cancellation while trying the fallback is benign.
-                        if (e2 is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
-                        com.newsradar.app.CrashLogger.record(
-                            RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e2)
-                        )
-                        emptyList()
+                        // A cancellation while trying the fallback is benign — return
+                        // empty rather than logging it as a (spurious) feed failure.
+                        if (e2 is kotlinx.coroutines.CancellationException) {
+                            emptyList()
+                        } else {
+                            com.newsradar.app.CrashLogger.record(
+                                RuntimeException("RssFetcher: feed fetch failed for '${outlet.id}' (${outlet.feedUrl})", e2)
+                            )
+                            emptyList()
+                        }
                     }
                 }
+                val imgCount = articles.count { !it.imageUrl.isNullOrBlank() }
+                val sample = articles.firstNotNullOfOrNull { it.imageUrl }
+                com.newsradar.app.CrashLogger.fetch(
+                    outletId = outlet.id,
+                    path = if (usedFallback) "jsoup-fallback" else "prof18",
+                    itemCount = articles.size,
+                    imageCount = imgCount,
+                    sampleImage = sample
+                )
+                if (articles.isEmpty()) {
+                    com.newsradar.app.CrashLogger.warn("outlet '${outlet.id}' returned 0 items")
+                }
+                articles
             }
         }
         val all = jobs.awaitAll().flatten()
+        com.newsradar.app.CrashLogger.lifecycle("refresh done: ${all.size} articles total")
 
         // Deduplicate: same story often appears once per feed; also BBC has two feeds.
         all.distinctBy { it.id }
@@ -78,7 +99,11 @@ class RssFetcher {
                         stripTeaser(full).take(3000)
                     },
                     link = link,
-                    imageUrl = item.image ?: item.itunesItemData?.image,
+                    imageUrl = UrlUtils.cleanImageUrl(
+                        item.image ?: item.itunesItemData?.image
+                            ?: extractFirstImage(item.content ?: "")
+                            ?: extractFirstImage(item.description ?: "")
+                    ),
                     outletId = outlet.id,
                     outletName = outlet.name,
                     publishedAt = parseDate(item.pubDate) ?: now,
@@ -111,8 +136,11 @@ class RssFetcher {
                     title = title,
                     summary = cleanHtml(rawDesc).take(3000),
                     link = link,
-                    imageUrl = el.selectFirst("image|url")?.text()
-                        ?: el.selectFirst("enclosure")?.attr("url"),
+                    imageUrl = UrlUtils.cleanImageUrl(
+                        el.selectFirst("image|url")?.text()
+                            ?: el.selectFirst("enclosure")?.attr("url")
+                            ?: extractFirstImage(rawDesc)
+                    ),
                     outletId = outlet.id,
                     outletName = outlet.name,
                     publishedAt = parseDate(el.selectFirst("pubDate")?.text()) ?: now,
@@ -165,6 +193,21 @@ class RssFetcher {
         return if (match != null) s.take(match.range.first).trim() else s
     }
 
+    /**
+     * Pull the first image URL out of feed-body HTML. Some outlets (Metro) embed
+     * the lead image only as an <img src> inside <content:encoded> / <description>
+     * and ship no <media:content>/<enclosure>/<image> tag, so prof18's item.image
+     * is null. Used as a last-resort image source so those cards still get a thumb.
+     */
+    private fun extractFirstImage(html: String): String? {
+        if (html.isBlank()) return null
+        return Jsoup.parse(html)
+            .selectFirst("img[src]")
+            ?.absUrl("src")
+            ?.takeIf { it.startsWith("http") }
+            ?.let { UrlUtils.cleanImageUrl(it) }
+    }
+
     private fun parseDate(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null
         val patterns = listOf(
@@ -188,6 +231,23 @@ class RssFetcher {
     }
 
     companion object {
+        private const val BROWSER_UA =
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
         private val MULTIPLE_SPACES = Regex("\\s+")
+
+        // One OkHttpClient for all feeds: a single connection pool / dispatcher
+        // instead of a fresh one every refresh. The interceptor only stamps a
+        // browser User-Agent so CDNs (Metro) stop 403-ing the RSS request.
+        private val SHARED_CLIENT by lazy {
+            OkHttpClient.Builder()
+                .addInterceptor { chain ->
+                    chain.proceed(
+                        chain.request().newBuilder()
+                            .header("User-Agent", BROWSER_UA)
+                            .build()
+                    )
+                }
+                .build()
+        }
     }
 }

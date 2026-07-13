@@ -36,19 +36,34 @@ fun NewsRadarTheme(
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
     }
-    val p = palettes[colorScheme] ?: palettes.getValue(ColorScheme.BLUE)
+    val p = palettes[colorScheme] ?: palettes.getValue(ColorScheme.TEAL)
 
+    // "No Noise" surfaces (brand brief): deep charcoal in dark, paper white in
+    // light, with a subtle surface step for cards so we can drop borders/dividers
+    // and lean entirely on whitespace + surface contrast.
     val colors = if (dark) {
         darkColorScheme(
             primary = p.secondary,
             secondary = p.primary,
-            tertiary = p.tertiary
+            tertiary = p.tertiary,
+            background = Color(0xFF0A0A0A),
+            surface = Color(0xFF141414),
+            surfaceVariant = Color(0xFF1E1E1E),
+            onBackground = Color(0xFFEDEDED),
+            onSurface = Color(0xFFEDEDED),
+            onSurfaceVariant = Color(0xFFB0B0B0)
         )
     } else {
         lightColorScheme(
             primary = p.primary,
             secondary = p.secondary,
-            tertiary = p.tertiary
+            tertiary = p.tertiary,
+            background = Color(0xFFFFFFFF),
+            surface = Color(0xFFFAFAFA),
+            surfaceVariant = Color(0xFFF0F0F0),
+            onBackground = Color(0xFF111111),
+            onSurface = Color(0xFF111111),
+            onSurfaceVariant = Color(0xFF555555)
         )
     }
 
