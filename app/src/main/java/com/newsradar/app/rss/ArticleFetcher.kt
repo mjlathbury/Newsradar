@@ -433,13 +433,17 @@ object ArticleFetcher {
             l.contains("more in ") && l.contains("huffpost") ||
             l.startsWith("read this next") || l.startsWith("more from huffpost") ||
             l == "more on this story" || l == "related content" || l == "related stories" ||
-            // Sky inline cross-promo + trust/app promos
+            // Sky inline cross-promo + trust/app promos + image captions
             l.startsWith("read more:") || l.startsWith("read more from sky news:") ||
             l.contains("why you can trust") || l.contains("install the sky news app") ||
             l.contains("be the first to get breaking news") ||
             l.contains("see more sky news in google") || l.contains("related topics") ||
-            l.startsWith("image:") || l.startsWith("pic:") || l.startsWith("video:") ||
+            l.contains("image:") || l.contains("pic:") || l.contains("video:") ||
             l.contains("istock") || l.contains("getty images") || l.contains("rex features") ||
+            // Sky dateline + byline line, e.g. "Monday 13 July 2026 12:16, UK" /
+            // "...UKImage:" (byline merges with the image caption, no separator).
+            l.matches(Regex(".*\\d{1,2}\\s+[a-z]+\\s+\\d{4}.*")) && l.contains(", uk") ||
+            l.contains("ukimage:") || l.contains("uk image:") ||
             // HuffPost gotchas
             l == "advertisement" || l.contains("loadingerror loading") ||
             l.contains("doubleclick.net is blocked") ||
@@ -485,10 +489,14 @@ object ArticleFetcher {
             .filter { it.isNotBlank() }
             .filterNot { isBoilerplate(it) }
             .joinToString("\n\n")
-            .replace(Regex("\\n{3,}"), "\n\n")
+            .replace(Regex("\n{3,}"), "\n\n")
             .trim()
             .takeIf { it.length >= 40 }
     }
+
+    /** Test-only wrapper so unit tests can exercise the boilerplate filter. */
+    @kotlin.jvm.JvmStatic
+    fun cleanBodyForTest(raw: String): String? = cleanBody(raw)
 
     /**
      * Final sanitise pass on the already-assembled article text. Runs ONLY on the
