@@ -165,8 +165,23 @@ class NewsRepository private constructor(context: Context) {
     suspend fun getFeedPage(
         page: Int,
         pageSize: Int = 5,
-        excludeIds: Set<String> = emptySet()
+        excludeIds: Set<String> = emptySet(),
+        searchQuery: String = ""
     ): List<Article> {
+        // Keyword search: plain filtered feed (score-desc), no exploration mixing —
+        // the user is looking for specific matches, not a blended feed.
+        val q = searchQuery.trim()
+        if (q.isNotEmpty()) {
+            val enabled = dao.getOutletStates().filter { it.enabled }.map { it.outletId }
+            if (enabled.isEmpty()) return emptyList()
+            val minPublishedAt = System.currentTimeMillis() - FEED_MAX_AGE_MS
+            val pattern = "%${q.replace("%", "")}%"
+            val from = page * pageSize
+            val hits = dao.getFeedPageSearch(pageSize, from, enabled, pattern, minPublishedAt)
+                .filter { it.id !in excludeIds }
+            return applyVeto(hits).take(pageSize)
+        }
+
         // Outlets turned off in Settings are excluded from the feed immediately.
         // Use an *allowlist* of enabled IDs: if the user disables everything the
         // list is empty and we return a blank feed (a blocklist would leak any

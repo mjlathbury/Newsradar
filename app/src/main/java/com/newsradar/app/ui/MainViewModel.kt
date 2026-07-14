@@ -258,11 +258,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Feed ----
+    private val _feedQuery = MutableStateFlow("")
+    val feedQuery: StateFlow<String> = _feedQuery.asStateFlow()
+
+    fun setFeedQuery(q: String) {
+        _feedQuery.value = q
+        loadFirstPage()
+    }
+
+    fun clearFeedQuery() {
+        _feedQuery.value = ""
+        loadFirstPage()
+    }
+
     fun loadFirstPage() {
         viewModelScope.launch {
             _feed.value = _feed.value.copy(loading = true, page = 0)
-            val first = repo.getFeedPage(0)
-            if (first.isEmpty()) {
+            val q = _feedQuery.value
+            val first = repo.getFeedPage(0, searchQuery = q)
+            if (first.isEmpty() && q.isBlank()) {
                 refreshNow() // Auto-pull on first run so the feed is never empty.
             } else {
                 _feed.value = FeedUiState(
@@ -283,7 +297,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val nextPage = s.page + 1
             val loaded = s.articles.map { it.id }.toSet()
-            val more = repo.getFeedPage(nextPage, excludeIds = loaded)
+            val more = repo.getFeedPage(nextPage, excludeIds = loaded, searchQuery = _feedQuery.value)
             _feed.value = s.copy(
                 articles = s.articles + more,
                 reasons = s.reasons + buildReasons(more),
@@ -301,7 +315,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _feed.value = _feed.value.copy(refreshing = true, error = null)
             try {
                 repo.refresh()
-                val first = repo.getFeedPage(0)
+                val first = repo.getFeedPage(0, searchQuery = _feedQuery.value)
                 _feed.value = FeedUiState(
                     articles = first,
                     reasons = buildReasons(first),

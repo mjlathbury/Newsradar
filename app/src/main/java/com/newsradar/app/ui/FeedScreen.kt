@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,6 +72,10 @@ fun FeedScreen(
     val weather by vm.weather.collectAsState()
     val showDateBar by vm.showDateBar.collectAsState()
     val showSun by vm.showSun.collectAsState()
+    val feedQuery by vm.feedQuery.collectAsState()
+
+    var searchActive by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
 
     // In-app reader overlay state.
     var readerOpen by remember { mutableStateOf(false) }
@@ -123,22 +129,75 @@ fun FeedScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("NewsRadar #${com.newsradar.app.BuildInfo.BUILD_NUMBER}") },
-                navigationIcon = {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Filled.Menu, contentDescription = "Menu")
+            if (searchActive) {
+                // Search bar replaces the whole top bar while open. Typing filters
+                // the feed live; the X at the end clears the text AND closes it.
+                TopAppBar(
+                    title = {
+                        androidx.compose.material3.TextField(
+                            value = searchText,
+                            onValueChange = {
+                                searchText = it
+                                vm.setFeedQuery(it)
+                            },
+                            placeholder = { Text("Search headlines…") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = androidx.compose.material3.TextFieldDefaults.colors(
+                                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                                disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent
+                            )
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = {
+                                searchActive = false
+                                searchText = ""
+                                vm.clearFeedQuery()
+                            }
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close search")
+                        }
+                    },
+                    actions = {
+                        if (searchText.isNotEmpty()) {
+                            IconButton(
+                                onClick = {
+                                    searchText = ""
+                                    vm.setFeedQuery("")
+                                }
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                            }
+                        }
                     }
-                },
-                actions = {
-                    IconButton(onClick = { vm.refreshNow() }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
+                )
+            } else {
+                TopAppBar(
+                    title = { Text("NewsRadar #${com.newsradar.app.BuildInfo.BUILD_NUMBER}") },
+                    navigationIcon = {
+                        IconButton(onClick = { menuExpanded = true }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            searchActive = true
+                            searchText = feedQuery
+                        }) {
+                            Icon(Icons.Filled.Search, contentDescription = "Search")
+                        }
+                        IconButton(onClick = { vm.refreshNow() }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
+                        }
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                        }
                     }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
-                    }
-                }
-            )
+                )
+            }
         }
     ) { pad ->
         Box(Modifier.fillMaxSize().padding(pad)) {
@@ -170,6 +229,7 @@ fun FeedScreen(
                     state.articles.isEmpty() -> EmptyState(
                         refreshing = state.refreshing,
                         error = state.error,
+                        searchQuery = feedQuery,
                         onRefresh = { vm.refreshNow() }
                     )
 
@@ -317,20 +377,25 @@ fun FeedScreen(
 }
 
 @Composable
-private fun EmptyState(refreshing: Boolean, error: String?, onRefresh: () -> Unit) {
+private fun EmptyState(refreshing: Boolean, error: String?, searchQuery: String = "", onRefresh: () -> Unit) {
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        val message = when {
+            error != null -> error
+            searchQuery.isNotBlank() -> "No stories match \"$searchQuery\"."
+            else -> "No stories yet. Pull the latest UK headlines to get started."
+        }
         Text(
-            error ?: "No stories yet. Pull the latest UK headlines to get started.",
+            message,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
         Column(Modifier.padding(top = 16.dp)) {
             if (refreshing) CircularProgressIndicator()
-            else OutlinedButton(onClick = onRefresh) { Text("Fetch today's news") }
+            else if (searchQuery.isBlank()) OutlinedButton(onClick = onRefresh) { Text("Fetch today's news") }
         }
     }
 }

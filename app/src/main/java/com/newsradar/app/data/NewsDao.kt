@@ -69,6 +69,22 @@ interface NewsDao {
         minPublishedAt: Long = 0L
     ): List<Article>
 
+    /** Feed page filtered by a keyword (LIKE over title + summary). [pattern] is
+     *  the already-wrapped "%keyword%" string built by the repository. */
+    @Query(
+        "SELECT * FROM articles WHERE rating != 'RED' " +
+        "AND outletId IN (:enabledOutletIds) " +
+        "AND publishedAt >= :minPublishedAt " +
+        "AND (title LIKE :pattern OR summary LIKE :pattern) " +
+        "ORDER BY score DESC, publishedAt DESC LIMIT :limit OFFSET :offset"
+    )
+    suspend fun getFeedPageSearch(
+        limit: Int, offset: Int,
+        enabledOutletIds: List<String>,
+        pattern: String,
+        minPublishedAt: Long = 0L
+    ): List<Article>
+
     /** Ids (from [ids]) that already exist in the articles table. Used to skip
      *  redundant on-device entity extraction for unchanged articles on refresh. */
     @Query("SELECT id FROM articles WHERE id IN (:ids)")
