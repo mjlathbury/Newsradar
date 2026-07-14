@@ -127,6 +127,17 @@ fun FeedScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    if (state.startupLoading) {
+        // Full-screen startup splash with live scan counters while the first
+        // cold-start refresh runs (replaces the blank spinner).
+        SplashScreen(
+            outletsDone = state.splashOutletsDone,
+            outletsTotal = state.splashOutletsTotal,
+            articles = state.splashArticles
+        )
+        return
+    }
+
     Scaffold(
         topBar = {
             if (searchActive) {

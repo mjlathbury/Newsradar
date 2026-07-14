@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import java.time.LocalDate
@@ -40,7 +41,13 @@ data class FeedUiState(
     val refreshing: Boolean = false,
     val page: Int = 0,
     val canLoadMore: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    /** Initial startup splash: true while the first cold-start refresh is running. */
+    val startupLoading: Boolean = false,
+    /** Live splash counters, fed by RssFetcher.RefreshProgress. */
+    val splashOutletsDone: Int = 0,
+    val splashOutletsTotal: Int = 0,
+    val splashArticles: Int = 0
 )
 
 data class GreetingState(
@@ -279,7 +286,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val q = _feedQuery.value
             val first = repo.getFeedPage(0, searchQuery = q)
             if (first.isEmpty() && q.isBlank()) {
-                refreshNow() // Auto-pull on first run so the feed is never empty.
+                // Cold start with an empty DB: show the splash + live counters
+                // while the first refresh runs (instead of a blank spinner).
+                refreshNow(startupSplash = true)
             } else {
                 _feed.value = FeedUiState(
                     articles = first,
@@ -310,25 +319,50 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun refreshNow() {
+    fun refreshNow(startupSplash: Boolean = false) {
         // Cancel any in-flight sync so rapid toggle taps coalesce into one fetch.
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
-            _feed.value = _feed.value.copy(refreshing = true, error = null)
+            _feed.value = _feed.value.copy(
+                refreshing = true,
+                error = null,
+                startupLoading = startupSplash,
+                splashOutletsDone = 0,
+                splashOutletsTotal = 0,
+                splashArticles = 0
+            )
             try {
-                repo.refresh()
+                repo.refresh { done, total, articles ->
+                    // Progress arrives on an IO thread (the completing outlet job).
+                    // Bounce to the main dispatcher so all StateFlow mutations happen
+                    // on the UI thread — avoids stale-value reads of _feed.value and
+                    // keeps Compose state updates consistent.
+                    viewModelScope.launch(Dispatchers.Main) {
+                        _feed.update { s ->
+                            if (s.startupLoading) {
+                                s.copy(
+                                    splashOutletsDone = done,
+                                    splashOutletsTotal = total,
+                                    splashArticles = articles
+                                )
+                            } else s
+                        }
+                    }
+                }
                 val first = repo.getFeedPage(0, searchQuery = _feedQuery.value)
                 _feed.value = FeedUiState(
                     articles = first,
                     reasons = buildReasons(first),
                     page = 0,
-                    canLoadMore = first.size == 5
+                    canLoadMore = first.size == 5,
+                    startupLoading = false
                 )
                 lastFetchTime = System.currentTimeMillis()
                 recoverHeroImages(first)
             } catch (e: Exception) {
                 _feed.value = _feed.value.copy(
                     refreshing = false,
+                    startupLoading = false,
                     error = "Couldn't refresh. Check your connection."
                 )
             }

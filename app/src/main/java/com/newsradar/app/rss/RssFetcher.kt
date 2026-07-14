@@ -18,6 +18,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Fetches and parses RSS from all enabled UK outlets in parallel,
@@ -27,16 +28,35 @@ class RssFetcher {
 
     private val parser = RssParserBuilder(SHARED_CLIENT, StandardCharsets.UTF_8).build()
 
+    /**
+     * Progress callback for the splash screen: [doneOutlets] outlets have finished
+     * fetching, [totalOutlets] is the total enabled, [articlesSoFar] is the running
+     * count of parsed items as each outlet completes. Invoked on the main-safe
+     * coroutine dispatcher used by the caller.
+     */
+    fun interface RefreshProgress {
+        fun onProgress(doneOutlets: Int, totalOutlets: Int, articlesSoFar: Int)
+    }
+
     // Per-outlet budget for the whole fetch (primary + Jsoup fallback). Caps the
     // refresh at this regardless of any single slow/outage outlet, so one bad
     // source can't stall the entire batch (awaitAll waits for the slowest).
     private val OUTLET_TIMEOUT_MS = 10_000L
 
-    suspend fun fetchAll(enabledOutletIds: Set<String>): List<Article> = coroutineScope {
+    suspend fun fetchAll(
+        enabledOutletIds: Set<String>,
+        progress: RefreshProgress? = null
+    ): List<Article> = coroutineScope {
         val outlets = Outlets.ALL.filter { it.id in enabledOutletIds }
         val now = System.currentTimeMillis()
         com.newsradar.app.CrashLogger.lifecycle("refresh start: ${outlets.size} outlets")
+        progress?.onProgress(0, outlets.size, 0)
 
+        // Atomic counters: each parallel outlet job increments these on completion,
+        // so concurrent increments from Dispatchers.IO threads can't clobber each
+        // other (a plain `var` would lose updates and under-count).
+        val doneOutlets = AtomicInteger(0)
+        val articlesSoFar = AtomicInteger(0)
         val jobs = outlets.map { outlet ->
             async(Dispatchers.IO) {
                 // Bound each outlet independently: a slow/outage outlet must not
@@ -49,14 +69,8 @@ class RssFetcher {
                         // another (e.g. init + onResume both kicked off a refresh) — it is
                         // NOT a real feed failure, so don't log it as one. Only genuine errors.
                         if (e is kotlinx.coroutines.CancellationException) return@getOrElse emptyList()
-                        // prof18 can choke on tiny namespace/entity violations that a
-                        // server-side probe ignores (or a CDN serves a 403 to its default
-                        // UA). This is an expected transition, NOT a crash — fail over to
-                        // a direct Jsoup RSS parse before giving up on the outlet entirely.
                         usedFallback = true
                         runCatching { fetchOutletFallback(outlet, now) }.getOrElse { e2 ->
-                            // A cancellation while trying the fallback is benign — return
-                            // empty rather than logging it as a (spurious) feed failure.
                             if (e2 is kotlinx.coroutines.CancellationException) {
                                 emptyList()
                             } else {
@@ -79,6 +93,10 @@ class RssFetcher {
                     if (articles.isEmpty()) {
                         com.newsradar.app.CrashLogger.warn("outlet '${outlet.id}' returned 0 items")
                     }
+                    // Emit live progress as each outlet completes.
+                    doneOutlets.incrementAndGet()
+                    articlesSoFar.addAndGet(articles.size)
+                    progress?.onProgress(doneOutlets.get(), outlets.size, articlesSoFar.get())
                     articles
                 } ?: emptyList() // timeout -> contribute nothing, batch proceeds
             }

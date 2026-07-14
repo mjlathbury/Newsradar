@@ -53,8 +53,10 @@ object Outlets {
      *  NOTE: mail + mirror were removed (2026-07-13) — a live HTTP probe proved
      *  both serve full server-rendered bodies under a normal mobile UA (Mirror
      *  JSON-LD articleBody = ~1.4k chars; Mail body in .article-text), so the
-     *  native reader extracts them fine. dailyrecord remains gated (unprobed CMS). */
-    private val GATED = setOf("dailyrecord")
+     *  native reader extracts them fine. Daily Record was un-gated (2026-07-14):
+     *  it uses the same consent-wall WebView fallback that fixed Sky — links to a
+     *  browser only if the WebView fallback also fails. */
+    private val GATED = setOf<String>()
 
     fun isGated(id: String): Boolean = id in GATED
 
@@ -83,16 +85,16 @@ object Outlets {
     // until tested — never pre-filled from offline replicas or subagent checks.
     private val READ_QUALITY: Map<String, String> = mapOf(
         "bbc" to "GREEN",         // verified clean by app extraction
-        "bbc_uk" to "AMBER",      // user-tested: minor stray end items
+        "bbc_uk" to "GREEN",      // user-approved
         "guardian" to "GREEN",    // verified 8000/23, 5934/13 clean
         "independent" to "GREEN", // verified 3951/21, 2016/19 (bookmark junk stripped)
-        "sky" to "AMBER",         // Akamai WAF: HTTP 403s -> WebView fallback (cookie-challenge clear) extracts on-device; verify
+        "sky" to "GREEN",         // user-confirmed working (WebView Akamai-cookie extraction, quotes fixed)
         "mirror" to "GREEN",      // verified 8000/62, 3464/16 clean
         "metro" to "GREEN",       // verified 2999/26, 2879/24 (tail promos stripped)
-        "mail" to "AMBER",        // link-heavy guard added (was "just links"); verify on-device
-        "express" to "AMBER",     // articleBody selector + header fix; WAF transient on sandbox, verify
+        "mail" to "GREEN",        // [class*=ad] body-deletion bug fixed; user-approved
+        "express" to "GREEN",     // articleBody selector + header fix; user-approved
         "standard" to "GREEN",    // verified 2561/13, 4115/25 clean
-        "huffpost" to "AMBER",    // user-tested AMBER; entry__body selector added
+        "huffpost" to "GREEN",    // entry__body selector added; user-approved
         "inews" to "GREEN",       // verified 3722/21, 4198/26 clean
         "dailyrecord" to "BLACK", // gated -> opens in browser (expected)
         "scotsman" to "GREEN",    // verified 1816/13, 4641/20 (Comments tail stripped)

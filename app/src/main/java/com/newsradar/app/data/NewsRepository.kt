@@ -51,11 +51,11 @@ class NewsRepository private constructor(context: Context) {
     }
 
     /** The daily (or manual) refresh: fetch -> store -> rescore -> prune. */
-    suspend fun refresh(): Int {
+    suspend fun refresh(
+        progress: com.newsradar.app.rss.RssFetcher.RefreshProgress? = null
+    ): Int {
         val refreshStart = System.currentTimeMillis()
         ensureOutletStates()
-        // One-time V2 migration (idempotent): adopts hard-veto semantics + backfills
-        // entity affinity from legacy RED ratings. Safe to skip on subsequent refreshes.
         if (!migratedV2) {
             migratedV2 = true
             recommender.migrateV2()
@@ -63,7 +63,7 @@ class NewsRepository private constructor(context: Context) {
         val enabled = dao.getOutletStates().filter { it.enabled }.map { it.outletId }.toSet()
         CrashLogger.lifecycle("refresh start: ${enabled.size} outlets")
         CrashLogger.diagnostic("1. Refresh triggered. outlets=${enabled.size}")
-        val fetched = fetcher.fetchAll(enabled)
+        val fetched = fetcher.fetchAll(enabled, progress)
         CrashLogger.diagnostic("2. Fetch completed. Item count: ${fetched.size}")
         if (fetched.isNotEmpty()) {
             CrashLogger.diagnostic("REFRESH_START fetched=${fetched.size}")

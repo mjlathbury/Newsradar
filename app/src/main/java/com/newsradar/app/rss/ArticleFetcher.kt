@@ -237,24 +237,6 @@ object ArticleFetcher {
                         cleanLink, body?.length ?: 0, ok = false,
                         snippet = "short-HTTP; $snippet"
                     )
-                    // TEMP DIAG: when HTTP body is short, log the best container
-                    // candidates so we can target the real mobile markup from a
-                    // device capture (datacenter IPs get consent-walled shells).
-                    runCatching {
-                        val cands = doc.select("div, article, main, section")
-                            .map { el -> Pair(el, el.text().length) }
-                            .filter { it.second >= 200 }
-                            .sortedByDescending { it.second }
-                            .take(6)
-                        val report = cands.joinToString(" | ") { (el, len) ->
-                            val cls = (el.className()?.take(60) ?: el.tagName())
-                            "${el.tagName()}[$cls]=$len"
-                        }
-                        CrashLogger.diagnostic(
-                            "CONTAINER_CANDIDATES host=${runCatching { java.net.URL(cleanLink).host }.getOrDefault("?")} " +
-                            "chosen=${extracted?.length ?: 0} top=[$report]"
-                        )
-                    }
                     tryAmp(cleanLink) ?: webViewFallback(cleanLink, context) ?: body
                 }
             } catch (e: Exception) {
