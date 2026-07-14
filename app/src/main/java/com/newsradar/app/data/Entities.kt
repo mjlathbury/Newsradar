@@ -12,7 +12,12 @@ enum class Rating { NONE, GREEN, AMBER, RED }
  * A news article ingested from an RSS feed.
  * `id` is a stable hash of the link so re-fetches dedupe naturally.
  */
-@Entity(tableName = "articles")
+@Entity(
+    tableName = "articles",
+    indices = [
+        Index(value = ["rating", "outletId", "publishedAt"], name = "index_articles_feed")
+    ]
+)
 data class Article(
     @PrimaryKey val id: String,
     val title: String,

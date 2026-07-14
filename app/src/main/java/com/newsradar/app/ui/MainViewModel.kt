@@ -68,6 +68,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _greeting = MutableStateFlow(GreetingState())
     val greeting: StateFlow<GreetingState> = _greeting.asStateFlow()
 
+    /** Active top-bar search query. Declared BEFORE init{} so loadFirstPage()
+     *  (called from init) can read it without a null-reference crash. */
+    private val _feedQuery = MutableStateFlow("")
+    val feedQuery: StateFlow<String> = _feedQuery.asStateFlow()
+
     /** State of an on-demand reader body: idle, loading, done (text), or too-thin. */
     data class ReaderState(
         val loading: Boolean = false,
@@ -258,9 +263,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Feed ----
-    private val _feedQuery = MutableStateFlow("")
-    val feedQuery: StateFlow<String> = _feedQuery.asStateFlow()
-
     fun setFeedQuery(q: String) {
         _feedQuery.value = q
         loadFirstPage()
