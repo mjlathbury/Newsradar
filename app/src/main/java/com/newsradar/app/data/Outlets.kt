@@ -37,6 +37,7 @@ object Outlets {
         Outlet("dailyrecord", "Daily Record", "https://www.dailyrecord.co.uk/news/?service=rss"),
         Outlet("scotsman", "The Scotsman", "https://www.scotsman.com/rss", Paywall.METERED),
         Outlet("walesonline", "Wales Online", "https://www.walesonline.co.uk/news/?service=rss"),
+        Outlet("gbnews", "GB News", "https://www.gbnews.com/feeds/feed.rss"),
         // Hard paywalls: kept in the list but OFF by default.
         Outlet("telegraph", "The Telegraph", "https://www.telegraph.co.uk/news/rss.xml",
             Paywall.HARD, defaultEnabled = false),
@@ -99,6 +100,7 @@ object Outlets {
         "dailyrecord" to "BLACK", // gated -> opens in browser (expected)
         "scotsman" to "GREEN",    // verified 1816/13, 4641/20 (Comments tail stripped)
         "walesonline" to "GREEN", // verified 5733/35, 1670/8 (live-blog artifact stripped)
+        "gbnews" to "AMBER",      // added 2026-07-14; feed verified open (30 items), extraction untested on-device
         "telegraph" to "BLACK",   // 403 server wall -> opens in browser (expected)
         "ft" to "BLACK"           // paywall -> opens in browser (expected)
     )
