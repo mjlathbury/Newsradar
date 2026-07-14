@@ -210,7 +210,9 @@ object ArticleFetcher {
             val cleanLink = normaliseLink(link)
             try {
                 val doc = fetchDoc(cleanLink) ?: run {
-                    CrashLogger.record(RuntimeException("ArticleFetcher: fetch failed (null doc) for $cleanLink"))
+                    // Expected for WAF/consent-walled outlets (e.g. Sky returns a
+                    // 24-byte bot-challenge page) — log as diagnostic, not a crash.
+                    CrashLogger.diagnostic("FETCH_NULL_DOC $cleanLink")
                     return@withContext null
                 }
 
@@ -254,9 +256,10 @@ object ArticleFetcher {
                     tryAmp(cleanLink) ?: webViewFallback(cleanLink, context) ?: body
                 }
             } catch (e: Exception) {
-                CrashLogger.record(
-                    RuntimeException("ArticleFetcher.fetchText failed for $cleanLink", e)
-                )
+                // Network timeouts / WAF blocks are expected for some outlets — record
+                // as a diagnostic (not a crash) so the log isn't full of false alarms.
+                val kind = if (e is kotlinx.coroutines.TimeoutCancellationException) "TIMEOUT" else e.javaClass.simpleName
+                CrashLogger.diagnostic("FETCH_FAIL $kind $cleanLink")
                 null
             }
         }
