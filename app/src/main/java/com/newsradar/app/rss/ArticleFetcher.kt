@@ -637,8 +637,20 @@ object ArticleFetcher {
                                             c.resume(res ?: "", onCancellation = {})
                                         }
                                     }
-                                    val clean = raw.removeSurrounding("\"").replace("\\n", "\n")
-                                        .replace("\\u003C", "<").trim()
+                                    // evaluateJavascript returns a JSON-encoded string
+                                    // (e.g. "He said \"hi\"\nNext line"). Decode it
+                                    // properly via a JSON parser so ALL escapes are
+                                    // handled — \" \\ \n \t \uXXXX etc. The old manual
+                                    // replace() only did \n and \u003C, so quotes came
+                                    // through as \" and backslashes doubled.
+                                    val clean = try {
+                                        org.json.JSONTokener(raw.ifEmpty { "\"\"" }).nextValue() as? String ?: ""
+                                    } catch (e: Exception) {
+                                        // Fallback: strip wrapping quotes + common escapes.
+                                        raw.removeSurrounding("\"")
+                                            .replace("\\\"", "\"").replace("\\n", "\n")
+                                            .replace("\\u003C", "<").replace("\\\\", "\\")
+                                    }.trim()
                                     if (clean.length > best.length) {
                                         best = clean
                                         lastLen = 0
