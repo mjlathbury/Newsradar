@@ -210,10 +210,12 @@ object ArticleFetcher {
             val cleanLink = normaliseLink(link)
             try {
                 val doc = fetchDoc(cleanLink) ?: run {
-                    // Expected for WAF/consent-walled outlets (e.g. Sky returns a
-                    // 24-byte bot-challenge page) — log as diagnostic, not a crash.
-                    CrashLogger.diagnostic("FETCH_NULL_DOC $cleanLink")
-                    return@withContext null
+                    // Hard block (e.g. Sky's Akamai WAF 403s the plain HTTP client).
+                    // Don't give up — the on-device WebView runs the real browser
+                    // engine on the user's residential IP and can clear the JS
+                    // cookie-challenge, so try AMP then the WebView before failing.
+                    CrashLogger.diagnostic("FETCH_NULL_DOC->WEBVIEW $cleanLink")
+                    return@withContext tryAmp(cleanLink) ?: webViewFallback(cleanLink, context)
                 }
 
                 val extracted = extractFromDoc(doc, cleanLink)
@@ -587,11 +589,20 @@ object ArticleFetcher {
         return withTimeoutOrNull(18_000) {
             withContext(Dispatchers.Main) {
                 suspendCancellableCoroutine<String?> { cont ->
+                    // Akamai / bot-manager WAFs (e.g. Sky News) set a JS challenge
+                    // cookie (_abck / ak_bmsc / bm_sz) then serve the real page on the
+                    // reload. Without cookie acceptance every pass re-challenges and we
+                    // only ever see the 24-byte "Powered and protected by" stub, so we
+                    // must accept + persist cookies for the fallback to clear the wall.
+                    val cookieMgr = android.webkit.CookieManager.getInstance()
+                    cookieMgr.setAcceptCookie(true)
                     val webView = WebView(context).apply {
                         settings.javaScriptEnabled = true
                         settings.blockNetworkImage = true
                         settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
                         settings.userAgentString = MOBILE_UA
+                        cookieMgr.setAcceptThirdPartyCookies(this, true)
                     }
                     var done = false
                     fun finish(text: String?) {
@@ -613,6 +624,7 @@ object ArticleFetcher {
                                 var lastLen = 0
                                 var best = ""
                                 var attempts = 0
+                                var reloadedForWaf = false
                                 delay(1200) // let the CMP / consent wall finish rendering
                                 while (attempts < 14 && cont.isActive) {
                                     delay(600)
@@ -632,6 +644,17 @@ object ArticleFetcher {
                                         lastLen = 0
                                     } else {
                                         lastLen++
+                                    }
+                                    // Akamai bot-manager: the first load is a tiny JS
+                                    // challenge stub that SETS the clearance cookie, then
+                                    // the real page is only served on the NEXT request.
+                                    // If the body is still stub-sized after a couple of
+                                    // passes, force one reload so the now-present cookie
+                                    // yields the article. Do this once.
+                                    if (!reloadedForWaf && attempts >= 2 && best.length < 400) {
+                                        reloadedForWaf = true
+                                        view?.reload()
+                                        delay(1500)
                                     }
                                     if (lastLen >= 3 && best.length > 400) {
                                         finish(best)
