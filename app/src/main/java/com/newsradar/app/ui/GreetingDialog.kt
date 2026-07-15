@@ -32,7 +32,7 @@ fun GreetingDialog(state: GreetingState, onDismiss: () -> Unit) {
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Here are today's top stories, picked for you.",
+                    "All News. No Noise.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

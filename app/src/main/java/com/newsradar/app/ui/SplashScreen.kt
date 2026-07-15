@@ -63,7 +63,17 @@ fun SplashScreen(
                 colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary)
             )
 
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(16.dp))
+
+            // Slogan under the logo.
+            Text(
+                text = "All News. No Noise.",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(Modifier.height(28.dp))
 
             // Outlets counter.
             Text(
