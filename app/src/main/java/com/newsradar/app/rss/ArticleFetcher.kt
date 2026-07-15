@@ -586,14 +586,26 @@ object ArticleFetcher {
                         settings.userAgentString = MOBILE_UA
                         cookieMgr.setAcceptThirdPartyCookies(this, true)
                     }
+                    // WebView MUST be torn down on the main thread — calling destroy()
+                    // from a coroutine cancel handler (which can run on any thread,
+                    // e.g. DefaultExecutor) throws "A WebView method was called on
+                    // thread ... All WebView methods must be called on the same
+                    // thread". Route every destroy through the main Looper.
+                    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+                    var destroyed = false
+                    fun safeDestroy() {
+                        if (destroyed) return
+                        destroyed = true
+                        mainHandler.post { webView.destroy() }
+                    }
                     var done = false
                     fun finish(text: String?) {
                         if (done) return
                         done = true
                         if (cont.isActive) cont.resume(text, onCancellation = {})
-                        webView.destroy()
+                        safeDestroy()
                     }
-                    cont.invokeOnCancellation { webView.destroy() }
+                    cont.invokeOnCancellation { safeDestroy() }
                     webView.webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView?, loadedUrl: String?) {
                             super.onPageFinished(view, loadedUrl)
