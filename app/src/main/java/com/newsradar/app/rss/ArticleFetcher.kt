@@ -90,6 +90,7 @@ object ArticleFetcher {
         // anchor text reads like prose and leaks into the body.
         "[class*=recirc]", "[class*=entry__embed]", "[class*=card__headline]",
         "[class*=related-posts]", "[class*=stream-item]", "[class*=vertical-related]",
+        "[class*=below-entry-content]",  // HuffPost recirc footer below the article
         // Cluster C (broadcast / regional / paywall) — Sky, Scotsman, FT, Telegraph:
         // precise junk blocks that leak past <article> (newsletter forms, comments,
         // related/recirc, trust/share CTAs). Verified 2026-07-13 by subagent probe.
@@ -141,7 +142,8 @@ object ArticleFetcher {
         // holding the mol-para paragraphs; the recirc "Next Stories" is a sibling
         // <div class="next-stories"> that is now stripped via JUNK_SELECTORS.
         "[class*=heading-tag-switch]",
-        "[class*=entry__body]", "[class*=card__body]",  // HuffPost (precise)
+        "[class*=entry__content-list-container]", "[class*=list__item]",  // HuffPost (current body)
+        "[class*=entry__body]", "[class*=card__body]",  // HuffPost (legacy)
         "main", "article"               // last resort (too broad — pulls tail)
     )
 
@@ -153,10 +155,22 @@ object ArticleFetcher {
 
     // OkHttp client for article fetches — shares the browser UA + connection pool
     // approach that defeats 403s on RSS (Sky hard-blocks Jsoup's own HttpClient).
+    // The full browser-style header set (incl. Accept / Accept-Language) is required:
+    // HuffPost's CDN returns HTTP 406 (0 bytes) to a request without an Accept
+    // header, which is why the plain-HTTP path previously got a 90-byte stub and
+    // always fell through to the (slow, often-timing-out) WebView fallback.
     private val HTTP_CLIENT = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                    .header("Accept-Language", "en-GB,en;q=0.9")
+                    .build()
+            )
+        }
         .build()
 
     /** Fetch a URL over OkHttp (browser UA + consent cookie) and parse with Jsoup.
